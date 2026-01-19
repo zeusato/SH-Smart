@@ -1,12 +1,24 @@
-# SHS Trading Electron Shell
+# SHS Smart Trading Shell
+
+[![Latest Release](https://img.shields.io/github/v/release/zeusato/SH-Smart?style=for-the-badge&color=orange)](https://github.com/zeusato/SH-Smart/releases/latest)
+
+**Tải bản cài đặt mới nhất tại đây:** [SH-Smart Releases](https://github.com/zeusato/SH-Smart/releases/latest)
 
 A custom Electron-based shell for the SHS Trading platform.
 
 ## Features
-- **Single Domain Mode**: Restricted to `shsmart.shs.com.vn`.
-- **Navigation Blocking**: Prevents navigating to external sites (opens them in default browser).
-- **Splash Screen**: Fast loading startup screen.
-- **Dedicated Shell**: No browser toolbars or menus.
+- **Smart OTP Manager**: 
+    - Auto-detect OTP input fields.
+    - Organize OTP cards with secure encryption.
+    - **One-click Fill**: Toast notification with code for manual entry or easy viewing.
+    - Screenshot reading via OCR space.
+- **Optimized for Traders**:
+    - **Always on Top**: Pin window to monitor while working.
+    - **System Tray**: Minimize to tray to keep connection alive.
+    - **Auto-Update**: Background updates via GitHub Releases.
+- **Core Security**: 
+    - Restricted to `shsmart.shs.com.vn`.
+    - Secure storage for credentials.
 
 ## Setup
 
