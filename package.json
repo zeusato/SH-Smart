@@ -1,6 +1,6 @@
 {
   "name": "shs-trading-shell",
-  "version": "1.0.0",
+  "version": "1.0.4",
   "description": "SH Smart Trading Application",
   "main": "src/main.js",
   "scripts": {
@@ -15,7 +15,9 @@
     "png-to-ico": "^3.0.1"
   },
   "dependencies": {
+    "crypto-js": "^4.2.0",
     "electron-log": "^5.4.3",
-    "electron-updater": "^6.7.3"
+    "electron-updater": "^6.7.3",
+    "tesseract.js": "^7.0.0"
   }
 }
