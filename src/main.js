@@ -207,281 +207,298 @@ function setupNavigationHandlers(window) {
   });
 }
 
-app.whenReady().then(() => {
-  loadConfig();
-  // Use a global variable to share the promise
-  global.splashDelay = new Promise(resolve => setTimeout(resolve, 1800));
+// Single Instance Lock
+const gotTheLock = app.requestSingleInstanceLock();
 
-  createSplashWindow();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (event, commandLine, workingDirectory) => {
+    // Someone tried to run a second instance, we should focus our window.
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      if (!mainWindow.isVisible()) mainWindow.show(); // For tray cases
+      mainWindow.focus();
+    }
+  });
 
-  // Initialize Auto Updater
-  if (app.isPackaged) {
-    setupAutoUpdater();
+  app.whenReady().then(() => {
+    loadConfig();
+    // Use a global variable to share the promise
+    global.splashDelay = new Promise(resolve => setTimeout(resolve, 1800));
+
+    createSplashWindow();
+
+    // Initialize Auto Updater
+    if (app.isPackaged) {
+      setupAutoUpdater();
+    }
+
+    // Create main window a bit later or immediately.
+    // We start loading main window immediately so it's ready faster.
+    createMainWindow();
+    createTray();
+
+    // Settings Window Logic
+    ipcMain.on('open-settings', () => {
+      createSettingsWindow();
+    });
+
+    ipcMain.on('save-settings', (event, newSettings) => {
+      // Legacy support or specific renderer logic
+    });
+
+    // --- General Settings IPCs ---
+    ipcMain.handle('get-general-settings', () => config);
+
+    ipcMain.handle('set-general-setting', (event, { key, value }) => {
+      config[key] = value;
+      saveConfig();
+
+      if (key === 'alwaysOnTop' && mainWindow) {
+        mainWindow.setAlwaysOnTop(value);
+      }
+      if (key === 'defaultZoom' && mainWindow) {
+        mainWindow.webContents.setZoomFactor(value / 100);
+      }
+      return true;
+    });
+
+    ipcMain.handle('clear-cache', async () => {
+      if (mainWindow) {
+        await mainWindow.webContents.session.clearCache();
+        return true;
+      }
+      return false;
+    });
+  });
+
+  let isQuitting = false;
+  app.on('before-quit', () => {
+    app.isQuitting = true;
+  });
+
+  function createTray() {
+    tray = new Tray(path.join(getAssetPath(), 'icon.png'));
+    const contextMenu = Menu.buildFromTemplate([
+      { label: 'Mở SH Smart', click: () => mainWindow.show() },
+      { type: 'separator' },
+      {
+        label: 'Thoát', click: () => {
+          app.isQuitting = true;
+          app.quit();
+        }
+      }
+    ]);
+    tray.setToolTip('SH Smart Trading Shell');
+    tray.setContextMenu(contextMenu);
+
+    tray.on('double-click', () => {
+      mainWindow.show();
+    });
   }
 
-  // Create main window a bit later or immediately.
-  // We start loading main window immediately so it's ready faster.
-  createMainWindow();
-  createTray();
+  let settingsWindow;
+  function createSettingsWindow() {
+    if (settingsWindow) {
+      settingsWindow.focus();
+      return;
+    }
 
-  // Settings Window Logic
-  ipcMain.on('open-settings', () => {
-    createSettingsWindow();
+    settingsWindow = new BrowserWindow({
+      width: 900,
+      height: 600,
+      title: "Cài đặt Shell",
+      parent: mainWindow, // Make it a child
+      modal: true,       // Block interaction with parent
+      resizable: false,
+      maximizable: false,
+      minimizable: false,
+      autoHideMenuBar: true,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false,
+        webSecurity: false
+      }
+      // Icon is inherited from parent in Windows taskbar grouping usually, 
+      // or we can keep it if we want the window itself to have an icon in the corner.
+      // But 'skipTaskbar' is implicit with modal parent on some OS, let's be safe:
+      // skipTaskbar: true // Not strictly needed if modal, but good for "running inside" feel.
+    });
+
+    settingsWindow.loadFile(path.join(__dirname, 'settings/index.html'));
+
+    settingsWindow.on('closed', () => {
+      settingsWindow = null;
+    });
+  }
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createMainWindow();
+    }
   });
 
-  ipcMain.on('save-settings', (event, newSettings) => {
-    // Legacy support or specific renderer logic
+
+
+  // OTP Manager Logic
+  const fs = require('fs');
+  // crypto is native, but we need crypto-js to match renderer's encryption format
+  const CryptoJS = require('crypto-js');
+
+  const userDataPath = app.getPath('userData');
+  const otpFilePath = path.join(userDataPath, 'otp_data.json');
+
+  // In-memory session: { [cardId]: { data: [Array of 35 codes], timestamp: Date } }
+  const otpSession = {};
+  const SESSION_DURATION = 8 * 60 * 60 * 1000; // 8 hours
+
+  ipcMain.handle('attempt-unlock-otp', (event, { cardId, password }) => {
+    try {
+      if (!fs.existsSync(otpFilePath)) return { success: false, error: 'File data not found' };
+
+      const allCards = JSON.parse(fs.readFileSync(otpFilePath, 'utf8'));
+      const card = allCards.find(c => c.id === cardId);
+
+      if (!card) return { success: false, error: 'Card not found' };
+
+      // Decrypt
+      const bytes = CryptoJS.AES.decrypt(card.data, password);
+      const decryptedStr = bytes.toString(CryptoJS.enc.Utf8);
+
+      if (!decryptedStr) {
+        return { success: false, error: 'Sai mật khẩu' };
+      }
+
+      const codes = JSON.parse(decryptedStr);
+
+      // Success: Cache session
+      otpSession[cardId] = {
+        codes: codes,
+        expiry: Date.now() + SESSION_DURATION
+      };
+
+      return { success: true };
+
+    } catch (e) {
+      log.error('Unlock error:', e);
+      return { success: false, error: e.message };
+    }
   });
 
-  // --- General Settings IPCs ---
-  ipcMain.handle('get-general-settings', () => config);
 
-  ipcMain.handle('set-general-setting', (event, { key, value }) => {
-    config[key] = value;
-    saveConfig();
 
-    if (key === 'alwaysOnTop' && mainWindow) {
-      mainWindow.setAlwaysOnTop(value);
+
+  ipcMain.handle('get-otp-list', () => {
+    try {
+      if (!fs.existsSync(otpFilePath)) return [];
+      const raw = fs.readFileSync(otpFilePath, 'utf8');
+      const data = JSON.parse(raw);
+      // Return only metadata (id, name, hasPassword)
+      return data.map(item => ({
+        id: item.id,
+        name: item.name,
+        lastUsed: item.lastUsed
+      }));
+    } catch (e) {
+      log.error(e);
+      return [];
     }
-    if (key === 'defaultZoom' && mainWindow) {
-      mainWindow.webContents.setZoomFactor(value / 100);
+  });
+
+  ipcMain.handle('get-otp-card-enc', (event, cardId) => {
+    try {
+      if (!fs.existsSync(otpFilePath)) return null;
+      const data = JSON.parse(fs.readFileSync(otpFilePath, 'utf8'));
+      return data.find(item => item.id === cardId);
+    } catch (e) { return null; }
+  });
+
+  ipcMain.handle('save-otp-card', (event, cardData) => {
+    // cardData: { id, name, encryptedData (ciphertext) }
+    try {
+      let current = [];
+      if (fs.existsSync(otpFilePath)) {
+        current = JSON.parse(fs.readFileSync(otpFilePath, 'utf8'));
+      }
+      current.push(cardData);
+      fs.writeFileSync(otpFilePath, JSON.stringify(current, null, 2));
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
     }
+  });
+
+  ipcMain.handle('delete-otp-card', (event, cardId) => {
+    try {
+      if (!fs.existsSync(otpFilePath)) return { success: false, error: 'Not found' };
+      const current = JSON.parse(fs.readFileSync(otpFilePath, 'utf8'));
+      const index = current.findIndex(c => c.id === cardId);
+      if (index === -1) return { success: false, error: 'Card not found' };
+
+      current.splice(index, 1);
+      fs.writeFileSync(otpFilePath, JSON.stringify(current, null, 2));
+
+      // Clear session if exists
+      if (otpSession[cardId]) delete otpSession[cardId];
+
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('unlock-otp-card', (event, { cardId, codes }) => {
+    // The renderer sends us the DECRYPTED codes after verifying password there?
+    // OR renderer sends password and we decrypt?
+    // Better: Renderer does the decryption (CPU intensive) and sends us the clean codes to cache in session.
+    // Security trade-off: IPC sends plain codes. acceptable for local app.
+    otpSession[cardId] = {
+      codes: codes, // Array of 35 strings
+      expiry: Date.now() + SESSION_DURATION
+    };
     return true;
   });
 
-  ipcMain.handle('clear-cache', async () => {
-    if (mainWindow) {
-      await mainWindow.webContents.session.clearCache();
-      return true;
+  ipcMain.handle('request-otp-code', (event, { cardId, index }) => {
+    // Check session
+    const session = otpSession[cardId];
+    if (session && Date.now() < session.expiry) {
+      return { success: true, code: session.codes[index - 1] }; // index is 1-based
     }
-    return false;
-  });
-});
-
-let isQuitting = false;
-app.on('before-quit', () => {
-  app.isQuitting = true;
-});
-
-function createTray() {
-  tray = new Tray(path.join(getAssetPath(), 'icon.png'));
-  const contextMenu = Menu.buildFromTemplate([
-    { label: 'Mở SH Smart', click: () => mainWindow.show() },
-    { type: 'separator' },
-    {
-      label: 'Thoát', click: () => {
-        app.isQuitting = true;
-        app.quit();
-      }
-    }
-  ]);
-  tray.setToolTip('SH Smart Trading Shell');
-  tray.setContextMenu(contextMenu);
-
-  tray.on('double-click', () => {
-    mainWindow.show();
-  });
-}
-
-let settingsWindow;
-function createSettingsWindow() {
-  if (settingsWindow) {
-    settingsWindow.focus();
-    return;
-  }
-
-  settingsWindow = new BrowserWindow({
-    width: 900,
-    height: 600,
-    title: "Cài đặt Shell",
-    parent: mainWindow, // Make it a child
-    modal: true,       // Block interaction with parent
-    resizable: false,
-    maximizable: false,
-    minimizable: false,
-    autoHideMenuBar: true,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-      webSecurity: false
-    }
-    // Icon is inherited from parent in Windows taskbar grouping usually, 
-    // or we can keep it if we want the window itself to have an icon in the corner.
-    // But 'skipTaskbar' is implicit with modal parent on some OS, let's be safe:
-    // skipTaskbar: true // Not strictly needed if modal, but good for "running inside" feel.
+    return { success: false, reason: 'LOCKED' };
   });
 
-  settingsWindow.loadFile(path.join(__dirname, 'settings/index.html'));
+  // Auto-fill query from Preload
+  ipcMain.handle('get-auto-otp', (event, requiredIndex) => {
+    // Check if we have any active session
+    const activeCardId = Object.keys(otpSession).find(id => Date.now() < otpSession[id].expiry);
+    if (activeCardId) {
+      const code = otpSession[activeCardId].codes[requiredIndex - 1];
+      // Ideally we should tell the user WHICH card we used if there are multiple, 
+      // but requirement says "If multiple... show list". 
+      // For now, if we have a valid session, return it.
+      return { success: true, code, cardId: activeCardId };
+    }
 
-  settingsWindow.on('closed', () => {
-    settingsWindow = null;
+    // Check if we have cards at all
+    if (!fs.existsSync(otpFilePath)) return { success: false, reason: 'NO_CARDS' };
+    const raw = JSON.parse(fs.readFileSync(otpFilePath, 'utf8'));
+    if (raw.length === 0) return { success: false, reason: 'NO_CARDS' };
+
+    return { success: false, reason: 'LOCKED', cardCount: raw.length };
   });
-}
 
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createMainWindow();
-  }
-});
-
-
-
-// OTP Manager Logic
-const fs = require('fs');
-// crypto is native, but we need crypto-js to match renderer's encryption format
-const CryptoJS = require('crypto-js');
-
-const userDataPath = app.getPath('userData');
-const otpFilePath = path.join(userDataPath, 'otp_data.json');
-
-// In-memory session: { [cardId]: { data: [Array of 35 codes], timestamp: Date } }
-const otpSession = {};
-const SESSION_DURATION = 8 * 60 * 60 * 1000; // 8 hours
-
-ipcMain.handle('attempt-unlock-otp', (event, { cardId, password }) => {
-  try {
-    if (!fs.existsSync(otpFilePath)) return { success: false, error: 'File data not found' };
-
-    const allCards = JSON.parse(fs.readFileSync(otpFilePath, 'utf8'));
-    const card = allCards.find(c => c.id === cardId);
-
-    if (!card) return { success: false, error: 'Card not found' };
-
-    // Decrypt
-    const bytes = CryptoJS.AES.decrypt(card.data, password);
-    const decryptedStr = bytes.toString(CryptoJS.enc.Utf8);
-
-    if (!decryptedStr) {
-      return { success: false, error: 'Sai mật khẩu' };
+  // Open Settings specifically for OTP unlocking
+  ipcMain.on('prompt-otp-unlock', () => {
+    createSettingsWindow();
+    // Optionally notify settings window to switch to OTP tab
+    if (settingsWindow) {
+      settingsWindow.webContents.send('switch-tab', 'otp');
     }
+  });
 
-    const codes = JSON.parse(decryptedStr);
-
-    // Success: Cache session
-    otpSession[cardId] = {
-      codes: codes,
-      expiry: Date.now() + SESSION_DURATION
-    };
-
-    return { success: true };
-
-  } catch (e) {
-    log.error('Unlock error:', e);
-    return { success: false, error: e.message };
-  }
-});
-
-
-
-
-ipcMain.handle('get-otp-list', () => {
-  try {
-    if (!fs.existsSync(otpFilePath)) return [];
-    const raw = fs.readFileSync(otpFilePath, 'utf8');
-    const data = JSON.parse(raw);
-    // Return only metadata (id, name, hasPassword)
-    return data.map(item => ({
-      id: item.id,
-      name: item.name,
-      lastUsed: item.lastUsed
-    }));
-  } catch (e) {
-    log.error(e);
-    return [];
-  }
-});
-
-ipcMain.handle('get-otp-card-enc', (event, cardId) => {
-  try {
-    if (!fs.existsSync(otpFilePath)) return null;
-    const data = JSON.parse(fs.readFileSync(otpFilePath, 'utf8'));
-    return data.find(item => item.id === cardId);
-  } catch (e) { return null; }
-});
-
-ipcMain.handle('save-otp-card', (event, cardData) => {
-  // cardData: { id, name, encryptedData (ciphertext) }
-  try {
-    let current = [];
-    if (fs.existsSync(otpFilePath)) {
-      current = JSON.parse(fs.readFileSync(otpFilePath, 'utf8'));
-    }
-    current.push(cardData);
-    fs.writeFileSync(otpFilePath, JSON.stringify(current, null, 2));
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('delete-otp-card', (event, cardId) => {
-  try {
-    if (!fs.existsSync(otpFilePath)) return { success: false, error: 'Not found' };
-    const current = JSON.parse(fs.readFileSync(otpFilePath, 'utf8'));
-    const index = current.findIndex(c => c.id === cardId);
-    if (index === -1) return { success: false, error: 'Card not found' };
-
-    current.splice(index, 1);
-    fs.writeFileSync(otpFilePath, JSON.stringify(current, null, 2));
-
-    // Clear session if exists
-    if (otpSession[cardId]) delete otpSession[cardId];
-
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('unlock-otp-card', (event, { cardId, codes }) => {
-  // The renderer sends us the DECRYPTED codes after verifying password there?
-  // OR renderer sends password and we decrypt?
-  // Better: Renderer does the decryption (CPU intensive) and sends us the clean codes to cache in session.
-  // Security trade-off: IPC sends plain codes. acceptable for local app.
-  otpSession[cardId] = {
-    codes: codes, // Array of 35 strings
-    expiry: Date.now() + SESSION_DURATION
-  };
-  return true;
-});
-
-ipcMain.handle('request-otp-code', (event, { cardId, index }) => {
-  // Check session
-  const session = otpSession[cardId];
-  if (session && Date.now() < session.expiry) {
-    return { success: true, code: session.codes[index - 1] }; // index is 1-based
-  }
-  return { success: false, reason: 'LOCKED' };
-});
-
-// Auto-fill query from Preload
-ipcMain.handle('get-auto-otp', (event, requiredIndex) => {
-  // Check if we have any active session
-  const activeCardId = Object.keys(otpSession).find(id => Date.now() < otpSession[id].expiry);
-  if (activeCardId) {
-    const code = otpSession[activeCardId].codes[requiredIndex - 1];
-    // Ideally we should tell the user WHICH card we used if there are multiple, 
-    // but requirement says "If multiple... show list". 
-    // For now, if we have a valid session, return it.
-    return { success: true, code, cardId: activeCardId };
-  }
-
-  // Check if we have cards at all
-  if (!fs.existsSync(otpFilePath)) return { success: false, reason: 'NO_CARDS' };
-  const raw = JSON.parse(fs.readFileSync(otpFilePath, 'utf8'));
-  if (raw.length === 0) return { success: false, reason: 'NO_CARDS' };
-
-  return { success: false, reason: 'LOCKED', cardCount: raw.length };
-});
-
-// Open Settings specifically for OTP unlocking
-ipcMain.on('prompt-otp-unlock', () => {
-  createSettingsWindow();
-  // Optionally notify settings window to switch to OTP tab
-  if (settingsWindow) {
-    settingsWindow.webContents.send('switch-tab', 'otp');
-  }
-});
+} // End of Single Instance Lock ELSE block
 
 
 

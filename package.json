@@ -1,6 +1,6 @@
 {
   "name": "shs-trading-shell",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "description": "SH Smart Trading Application",
   "main": "src/main.js",
   "scripts": {
