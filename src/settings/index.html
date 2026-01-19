@@ -14,6 +14,7 @@
     <div id="sidebar">
         <div class="sidebar-header">MENU</div>
         <div class="nav-item active" data-tab="general">Chung (General)</div>
+        <div class="nav-item" data-tab="widget">Widget Giá</div>
         <div class="nav-item" data-tab="otp">Quản lý OTP</div>
         <div class="nav-item" data-tab="shortcuts">Phím tắt</div>
         <div class="nav-item" data-tab="about">Thông tin</div>
@@ -153,6 +154,33 @@
                     • Nếu thẻ chưa mở khóa, popup nhập mật khẩu sẽ xuất hiện.<br>
                     • Mã OTP hiển thị dạng Toast lớn ở giữa màn hình trong 5 giây.
                 </p>
+            </div>
+        </div>
+
+        <div id="tab-widget" class="tab-content" style="display: none;">
+            <h2>Cấu hình Widget Giá</h2>
+            <div class="settings-group">
+                <h3>Trạng thái</h3>
+                <label class="setting-item">
+                    <input type="checkbox" id="chk-widget-enable"> Bật Widget Cảnh báo giá
+                </label>
+                <p style="color: #aaa; font-size: 13px;">Widget sẽ hiện nổi trên màn hình desktop.</p>
+            </div>
+
+            <div class="settings-group">
+                <h3>Danh mục theo dõi (Tối đa 5 mã)</h3>
+                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                    <input type="text" class="watchlist-input" maxlength="3" placeholder="Mã 1">
+                    <input type="text" class="watchlist-input" maxlength="3" placeholder="Mã 2">
+                    <input type="text" class="watchlist-input" maxlength="3" placeholder="Mã 3">
+                    <input type="text" class="watchlist-input" maxlength="3" placeholder="Mã 4">
+                    <input type="text" class="watchlist-input" maxlength="3" placeholder="Mã 5">
+                    <button id="btn-clear-watchlist" class="btn"
+                        style="padding: 5px 10px; background: #c0392b; white-space: nowrap; margin-left: 5px;"
+                        title="Xóa toàn bộ">X</button>
+                </div>
+                <p style="color: #aaa; font-size: 13px;">Nhập mã cổ phiếu (Ví dụ: HPG, SSI, VPB...). Để trống nếu không
+                    dùng.</p>
             </div>
         </div>
 

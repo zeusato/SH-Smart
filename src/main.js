@@ -4,6 +4,9 @@ const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
 
+// Disable Hardware Acceleration for Transparent Window
+app.disableHardwareAcceleration();
+
 // Configure logging
 autoUpdater.logger = log;
 autoUpdater.logger.transports.file.level = 'info';
@@ -44,6 +47,7 @@ let mainWindow;
 let splashWindow;
 let settingsWindow = null;
 let tray = null;
+let widgetWindow = null;
 let config = {
   alwaysOnTop: false,
   closeToTray: false,
@@ -77,6 +81,133 @@ function getAssetPath() {
     return path.join(__dirname, '../assets');
   }
 }
+
+function createWidgetWindow() {
+  const { screen } = require('electron');
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width, height } = primaryDisplay.workAreaSize;
+
+  // Initial dimensions (Compact: 125 * 5 + padding ~ 650)
+  const initialW = 660;
+  const initialH = 80;
+
+  widgetWindow = new BrowserWindow({
+    width: initialW,
+    height: initialH,
+    x: width - initialW - 30, // Bottom Right with padding
+    y: height - initialH - 20,
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: true,
+    hasShadow: false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+
+  widgetWindow.loadFile(path.join(__dirname, 'widget/index.html'));
+
+  widgetWindow.on('closed', () => {
+    widgetWindow = null;
+  });
+}
+
+// ... (createSplashWindow) ...
+
+// Widget IPCs
+ipcMain.handle('get-widget-config', () => {
+  return config;
+});
+
+ipcMain.on('toggle-widget', (event, shouldEnable) => {
+  config.widgetEnable = shouldEnable;
+  saveConfig();
+
+  if (shouldEnable) {
+    if (!widgetWindow) createWidgetWindow();
+    if (mainWindow) mainWindow.webContents.send('widget-enabled');
+  } else {
+    if (widgetWindow) widgetWindow.close();
+  }
+});
+
+// Handle External Close Request (Right Click)
+ipcMain.on('request-close-widget', () => {
+  // Debug: Confirm receipt
+  const { dialog } = require('electron');
+  // dialog.showMessageBox({ message: "Debug: Close Request Received" }); 
+  // Commenting out dialog, just using console Log for now to avoid blocking if user doesn't see it?
+  // No, user said "ko chạy". I need to be sure.
+  // I will use console.log first. Terminal is visible to me.
+  console.log('DEBUG: request-close-widget received in MAIN');
+
+  config.widgetEnable = false;
+  saveConfig();
+  if (widgetWindow) {
+    widgetWindow.close();
+  }
+  // Sync Settings Window if open
+  if (settingsWindow) {
+    settingsWindow.webContents.send('sync-widget-state', false);
+  }
+});
+
+// Handle Open Symbol Request (Click)
+ipcMain.on('request-open-symbol', async (event, symbol) => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+
+    // Flow: F9 -> Wait -> Type Symbol -> Enter
+    // 1. Press F9
+    mainWindow.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'F9' });
+    mainWindow.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'F9' });
+
+    // 2. Wait for Search Bar (500ms)
+    setTimeout(() => {
+      // 3. Type Symbol
+      mainWindow.webContents.insertText(symbol);
+
+      // 4. Wait & Enter
+      setTimeout(() => {
+        mainWindow.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+        mainWindow.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
+      }, 300);
+    }, 500);
+  }
+});
+
+ipcMain.on('update-widget-watchlist', (event, list) => {
+  config.watchlist = list;
+  saveConfig();
+  if (mainWindow) {
+    mainWindow.webContents.send('watchlist-changed', list);
+  }
+});
+
+// Relay Data: Preload -> Widget
+ipcMain.on('price-update-data', (event, data) => {
+  if (widgetWindow) {
+    widgetWindow.webContents.send('update-prices', data);
+  }
+});
+
+ipcMain.on('resize-widget', (event, { width, height }) => {
+  if (widgetWindow && !widgetWindow.isDestroyed()) {
+    try {
+      const newWidth = Math.max(width, 100);
+      const newHeight = Math.max(height, 50);
+      widgetWindow.setContentSize(Math.ceil(newWidth), Math.ceil(newHeight));
+
+      // Optional: Keep it anchored to bottom-right when resizing?
+      // For now, standard resize is fine.
+    } catch (e) { }
+  }
+});
 
 function createSplashWindow() {
   splashWindow = new BrowserWindow({
@@ -202,11 +333,12 @@ function setupNavigationHandlers(window) {
       // Defaulting to allow native window creation for same domain
       return { action: 'allow' };
     } else {
-      // Open external links in default system browser
       shell.openExternal(url);
       return { action: 'deny' };
     }
   });
+
+
 }
 
 // Single Instance Lock
@@ -342,6 +474,8 @@ if (!gotTheLock) {
       settingsWindow = null;
     });
   }
+
+
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

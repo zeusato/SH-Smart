@@ -300,7 +300,6 @@ window.addEventListener('DOMContentLoaded', () => {
             // F9: Click Search (Magnifying Glass) Icon
             if (e.key === 'F9') {
                 e.preventDefault();
-                console.log('Shortcut F9: Opening Search...');
 
                 const searchXpaths = [
                     // Specific SVG Path from User Screenshot
@@ -315,7 +314,6 @@ window.addEventListener('DOMContentLoaded', () => {
                 for (const xp of searchXpaths) {
                     searchIcon = document.evaluate(xp, document.body, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
                     if (searchIcon && searchIcon.offsetParent !== null) {
-                        console.log('Found Search via:', xp);
                         break;
                     } else {
                         searchIcon = null;
@@ -335,4 +333,121 @@ window.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // --- Price Widget Logic ---
+    const { ipcRenderer } = require('electron');
+    let priceInterval = null;
+    let currentWatchlist = [];
+
+    function startPricePoller() {
+        if (priceInterval) clearInterval(priceInterval);
+        if (!currentWatchlist || currentWatchlist.length === 0) return;
+
+        const fetchPrices = async () => {
+            try {
+                // Switch to stockInfos for richer data (Ref, Ceil, Floor)
+                const url = `https://shsmart.shs.com.vn/api/v1/finance/stockInfos?symbol=${currentWatchlist.join(',')}`;
+                const res = await fetch(url);
+                const json = await res.json();
+
+                // Parse Data
+                const updates = json.map(item => {
+                    return {
+                        symbol: item.symbol,
+                        price: (item.lastPrice || 0) * 1000,
+                        change: (item.priceChange || 0), // User requested unit 1k (0.1 for 100d)
+                        percent: (item.priceChangePercent || 0) * 100,
+                        ref: (item.basicPrice || 0) * 1000,
+                        ceil: (item.ceilPrice || 0) * 1000,
+                        floor: (item.flrPrice || 0) * 1000
+                    };
+                });
+
+                ipcRenderer.send('price-update-data', updates);
+            } catch (e) {
+                // Silent error
+            }
+        };
+
+        fetchPrices(); // Immediate first run
+        priceInterval = setInterval(fetchPrices, 3000); // 3 seconds
+    }
+
+    ipcRenderer.on('watchlist-changed', (event, list) => {
+        currentWatchlist = list;
+        clearInterval(priceInterval);
+        startPricePoller();
+    });
+
+    ipcRenderer.on('widget-enabled', () => {
+        ipcRenderer.invoke('get-widget-config').then(config => {
+            currentWatchlist = config.watchlist || [];
+            startPricePoller();
+        });
+    });
+
+    // Handle "Click on Widget Symbol" flow
+    ipcRenderer.on('trigger-search-flow', (event, symbol) => {
+        console.log('Triggering search for:', symbol);
+
+        // 1. Find and Click Search Icon (Reuse F9 logic)
+        const searchXpaths = [
+            `//*[local-name()='path' and starts-with(@d, 'M3 9.167a6.167')]/..`,
+            `//*[local-name()='svg' and contains(@class, 'cursor-po')]`,
+            `//*[contains(@title, 'Tìm kiếm')]`,
+            `//*[contains(@aria-label, 'Tìm kiếm')]`,
+            `//*[contains(@aria-label, 'Search')]`
+        ];
+
+        let searchIcon = null;
+        for (const xp of searchXpaths) {
+            searchIcon = document.evaluate(xp, document.body, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+            if (searchIcon && searchIcon.offsetParent !== null) break;
+            else searchIcon = null;
+        }
+
+        if (searchIcon) {
+            searchIcon.dispatchEvent(new MouseEvent('click', { view: window, bubbles: true, cancelable: true }));
+
+            // 2. Wait for Input to appear, then Type & Enter
+            setTimeout(() => {
+                // Try to find the search input
+                const inputs = document.querySelectorAll('input');
+                let searchInput = null;
+                // Heuristic: Input that is visible and potentially related to search
+                for (const inp of inputs) {
+                    if (inp.offsetParent !== null && (
+                        inp.placeholder.includes('Mã') ||
+                        inp.placeholder.includes('Symbol') ||
+                        inp.placeholder.includes('Tìm') ||
+                        inp.className.includes('search')
+                    )) {
+                        searchInput = inp;
+                        break;
+                    }
+                }
+
+                if (searchInput) {
+                    searchInput.focus();
+                    searchInput.value = symbol;
+                    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+                    setTimeout(() => {
+                        searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+                    }, 100);
+                }
+            }, 300); // 300ms wait for modal/input animation
+        }
+    });
+
+    // Initial Start
+    ipcRenderer.invoke('get-widget-config').then(config => {
+        if (config.widgetEnable) {
+            currentWatchlist = config.watchlist || [];
+            startPricePoller();
+            // The original code had a toggle-widget send here, re-adding it if config.enabled is true
+            ipcRenderer.send('toggle-widget', true);
+        }
+    });
+
 });

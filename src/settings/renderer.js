@@ -63,9 +63,65 @@ function initGeneralSettings() {
         if (confirm('Bạn có chắc muốn xóa cache và tải lại trang?')) {
             await ipcRenderer.invoke('clear-cache');
             ipcRenderer.send('save-settings', { action: 'reload' });
-            // alert('Đã xóa cache...'); // Removed to prevent focus issues
         }
     };
+
+    // --- Widget Settings ---
+    const chkWidget = document.getElementById('chk-widget-enable');
+    const watchlistInputs = document.querySelectorAll('.watchlist-input');
+
+    // Load Widget Config
+    ipcRenderer.invoke('get-general-settings').then(config => {
+        if (config.widgetEnable) chkWidget.checked = true;
+
+        const savedList = config.watchlist || [];
+        watchlistInputs.forEach((input, index) => {
+            if (savedList[index]) input.value = savedList[index];
+        });
+    });
+
+    // Save Widget Enable
+    chkWidget.onchange = (e) => {
+        setConfig('widgetEnable', e.target.checked);
+        ipcRenderer.send('toggle-widget', e.target.checked);
+    };
+
+    // Save Watchlist (Debounced or on Blur)
+    watchlistInputs.forEach(input => {
+        input.onblur = () => {
+            const newWatchlist = Array.from(watchlistInputs)
+                .map(i => i.value.trim().toUpperCase())
+                .filter(v => v); // Remove empty
+            setConfig('watchlist', newWatchlist);
+
+            if (chkWidget.checked) {
+                // Force update widget immediately
+                ipcRenderer.send('update-widget-watchlist', newWatchlist);
+            }
+        };
+    });
+
+    // Clear Watchlist Button
+    document.getElementById('btn-clear-watchlist').onclick = () => {
+        if (confirm('Bạn có chắc muốn xóa toàn bộ danh sách và tắt Widget?')) {
+            // 1. Clear UI
+            watchlistInputs.forEach(input => input.value = '');
+            chkWidget.checked = false;
+
+            // 2. Update Config
+            setConfig('watchlist', []);
+            setConfig('widgetEnable', false);
+
+            // 3. Send IPCs
+            ipcRenderer.send('update-widget-watchlist', []);
+            ipcRenderer.send('toggle-widget', false);
+        }
+    };
+
+    // Listen for Sync State from Main (When closed via context menu)
+    ipcRenderer.on('sync-widget-state', (event, isEnabled) => {
+        chkWidget.checked = isEnabled;
+    });
 }
 
 function setConfig(key, value) {

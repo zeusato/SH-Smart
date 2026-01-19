@@ -282,6 +282,21 @@ h3 {
     font-weight: bold;
     text-align: center;
     border-radius: 4px;
-    font-family: monospace;
-    font-size: 13px;
+}
+
+.watchlist-input {
+    width: 60px;
+    padding: 8px;
+    text-align: center;
+    text-transform: uppercase;
+    background: #333;
+    color: #fff;
+    border: 1px solid #444;
+    border-radius: 4px;
+    font-weight: bold;
+}
+
+.watchlist-input:focus {
+    border-color: #007acc;
+    outline: none;
 }
