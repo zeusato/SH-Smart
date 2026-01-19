@@ -3,6 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
+const aiService = require('./services/AIService');
+const APP_SECRET = "shsmart-secret-ai-key-salt"; // Simple obfuscation
 
 // Disable Hardware Acceleration for Transparent Window
 app.disableHardwareAcceleration();
@@ -406,6 +408,75 @@ if (!gotTheLock) {
       return true;
     });
 
+    // --- AI IPCs ---
+    ipcMain.handle('get-ai-config', () => {
+      // Return decrypted key for settings view
+      let decrypted = '';
+      if (config.aiApiKey) {
+        try {
+          const bytes = CryptoJS.AES.decrypt(config.aiApiKey, APP_SECRET);
+          decrypted = bytes.toString(CryptoJS.enc.Utf8);
+        } catch (e) { }
+      }
+      return { apiKey: decrypted };
+    });
+
+    ipcMain.handle('set-ai-key', (event, rawKey) => {
+      if (!rawKey) {
+        delete config.aiApiKey;
+      } else {
+        const encrypted = CryptoJS.AES.encrypt(rawKey, APP_SECRET).toString();
+        config.aiApiKey = encrypted;
+        // Init AI Service immediately
+        aiService.init(rawKey);
+        aiService.checkConnection(); // Verify immediately
+      }
+      saveConfig();
+      return true;
+    });
+
+    ipcMain.handle('ai-chat-request', async (event, { message, type, contextData }) => {
+      // Init if needed (e.g. startup)
+      if (!aiService.model && config.aiApiKey) {
+        try {
+          const bytes = CryptoJS.AES.decrypt(config.aiApiKey, APP_SECRET);
+          const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+          aiService.init(decrypted);
+        } catch (e) { }
+      }
+
+      if (type === 'technical') {
+        return await aiService.analyzeStock(contextData.symbol, contextData);
+      } else {
+        return await aiService.chatFreeStyle(message);
+      }
+    });
+
+    ipcMain.handle('get-ai-icon', async () => {
+      try {
+        // Adjust path depending on where main.js is running. 
+        // In dev: src/main.js -> public/AI.png is valid via ../public
+        // In prod: resources/app/public/AI.png 
+        const iconPath = path.join(__dirname, '../public/AI.png');
+        if (fs.existsSync(iconPath)) {
+          return fs.readFileSync(iconPath).toString('base64');
+        } else {
+          console.warn("AI Icon not found at:", iconPath);
+        }
+      } catch (e) {
+        console.error('Failed to load AI icon in Main:', e);
+      }
+      return null;
+    });
+
+    ipcMain.handle('get-chat-history', () => {
+      return aiService.history;
+    });
+
+    ipcMain.handle('ai-clear-history', () => {
+      aiService.clearHistory();
+    });
+
     ipcMain.handle('clear-cache', async () => {
       if (mainWindow) {
         await mainWindow.webContents.session.clearCache();
@@ -645,6 +716,8 @@ if (!gotTheLock) {
     }
   });
 
+
+
   ipcMain.handle('get-app-icon', () => {
     try {
       const iconPath = path.join(getAssetPath(), 'icon.png');
@@ -657,9 +730,9 @@ if (!gotTheLock) {
     return null;
   });
 
-
-
 } // End of Single Instance Lock ELSE block
+
+
 
 
 

@@ -16,6 +16,7 @@
         <div class="nav-item active" data-tab="general">Chung (General)</div>
         <div class="nav-item" data-tab="widget">Widget Giá</div>
         <div class="nav-item" data-tab="otp">Quản lý OTP</div>
+        <div class="nav-item" data-tab="ai">Trợ lý AI</div>
         <div class="nav-item" data-tab="shortcuts">Phím tắt</div>
         <div class="nav-item" data-tab="about">Thông tin</div>
     </div>
@@ -181,6 +182,42 @@
                 </div>
                 <p style="color: #aaa; font-size: 13px;">Nhập mã cổ phiếu (Ví dụ: HPG, SSI, VPB...). Để trống nếu không
                     dùng.</p>
+            </div>
+        </div>
+
+        <div id="tab-ai" class="tab-content" style="display: none;">
+            <h2>Cấu hình Trợ lý AI</h2>
+            <div class="settings-group">
+                <h3>Trạng thái & Kết nối</h3>
+                <div class="setting-item" style="display: flex; align-items: center; justify-content: space-between;">
+                    <span>Bật tính năng Trợ lý AI (Cần Restart)</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="chk-ai-enable">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="form-group" style="margin-top: 15px;">
+                    <label>Google Gemini API Key</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="password" id="inp-ai-key" placeholder="Nhập API Key bắt đầu bằng AIza..."
+                            style="flex: 1; padding: 8px; background: #333; color: #fff; border: 1px solid #555;">
+                        <button id="btn-save-ai-key" class="btn" style="background: #28a745;">Lưu</button>
+                        <button id="btn-clear-ai-key" class="btn" style="background: #c0392b;">Xóa</button>
+                    </div>
+                    <p style="font-size: 13px; color: #ccc; margin-top: 8px; line-height: 1.5;">
+                        <span style="color: #aaa;">Chưa có Key?</span>
+                        <a href="#"
+                            onclick="require('electron').shell.openExternal('https://aistudio.google.com/api-keys')"
+                            style="color: #4daafc; text-decoration: none;">👉 Bấm vào đây để lấy Key miễn phí từ Google
+                            AI Studio</a>
+                        <br><span style="font-size: 11px; color: #666;">(Chọn "Create API Key" -> Copy chuỗi bắt đầu
+                            bằng AIza...)</span>
+                    </p>
+                </div>
+            </div>
+            <div class="settings-group">
+                <h3>Tùy chỉnh</h3>
+                <p style="color: #aaa; font-size: 13px;">Sử dụng model: <b>gemini-3-flash-preview</b></p>
             </div>
         </div>
 

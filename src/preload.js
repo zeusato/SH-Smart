@@ -445,9 +445,459 @@ window.addEventListener('DOMContentLoaded', () => {
         if (config.widgetEnable) {
             currentWatchlist = config.watchlist || [];
             startPricePoller();
-            // The original code had a toggle-widget send here, re-adding it if config.enabled is true
             ipcRenderer.send('toggle-widget', true);
         }
     });
+
+    // ==========================================
+    // AI ASSISTANT INJECTION
+    // ==========================================
+    let aiIconSrc = 'https://cdn-icons-png.flaticon.com/512/4712/4712109.png'; // Fallback initial
+
+    // Load AI Config
+    ipcRenderer.invoke('get-general-settings').then(config => {
+        if (config.aiEnabled) {
+            injectAIUI();
+        }
+    });
+
+    function injectAIUI() {
+        console.log('Injecting AI UI...');
+
+        ipcRenderer.invoke('get-ai-icon').then(base64 => {
+            if (base64) aiIconSrc = `data:image/png;base64,${base64}`;
+
+            // Proceed to inject (moved inside callback to ensure icon is ready or defaulted)
+            doInject();
+        });
+    }
+
+    function doInject() {
+        // ... (existing injection logic, but wrapped in function)
+        const container = document.createElement('div');
+        container.id = 'shs-ai-container';
+        container.innerHTML = `
+            <style>
+                #shs-ai-floating-icon {
+                    position: fixed; bottom: 20px; right: 20px;
+                    width: 60px; height: 60px;
+                    border-radius: 50%;
+                    background: #202020;
+                    border: 2px solid #007acc;
+                    box-shadow: 0 4px 15px rgba(0,122,204,0.5);
+                    cursor: pointer; z-index: 10000;
+                    display: flex; align-items: center; justify-content: center;
+                    transition: transform 0.2s;
+                }
+                #shs-ai-floating-icon:hover { transform: scale(1.1); }
+                #shs-ai-floating-icon img { width: 85%; height: 85%; object-fit: contain; }
+
+                #shs-ai-chat-window {
+                    position: fixed; bottom: 90px; right: 20px;
+                    width: 350px; height: 500px;
+                    background: #1e1e1e;
+                    border: 1px solid #333;
+                    border-radius: 12px;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+                    z-index: 10000;
+                    display: none; flex-direction: column;
+                    font-family: 'Segoe UI', sans-serif;
+                    overflow: hidden;
+                }
+                #shs-ai-chat-window.modal-mode {
+                    width: 800px; height: 600px;
+                    top: 50%; left: 50%;
+                    transform: translate(-50%, -50%);
+                    bottom: auto; right: auto;
+                }
+
+                .ai-header {
+                    padding: 10px 15px; background: #252526; border-bottom: 1px solid #333;
+                    display: flex; justify-content: space-between; align-items: center;
+                    color: #fff; font-weight: bold; -webkit-user-select: none;
+                }
+                .ai-controls span { cursor: pointer; margin-left: 10px; color: #aaa; font-size: 14px; }
+                .ai-controls span:hover { color: #fff; }
+
+                .ai-tabs { display: flex; background: #2d2d2d; }
+                .ai-tab {
+                    flex: 1; padding: 8px; text-align: center; color: #aaa; cursor: pointer;
+                    font-size: 13px; border-bottom: 2px solid transparent;
+                }
+                .ai-tab.active { color: #fff; border-bottom: 2px solid #007acc; background: #1e1e1e; }
+
+                .ai-body { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+                
+                .ai-message { max-width: 85%; padding: 8px 12px; border-radius: 8px; font-size: 14px; line-height: 1.4; color: #ddd; }
+                .ai-message.user { align-self: flex-end; background: #007acc; color: #fff; }
+                .ai-message.model { align-self: flex-start; background: #333; }
+                
+                .ai-input-area {
+                    padding: 10px; background: #252526; border-top: 1px solid #333;
+                    display: flex; gap: 10px;
+                }
+                .ai-input-area input {
+                    flex: 1; background: #333; border: 1px solid #444; color: #fff;
+                    padding: 8px; border-radius: 4px; outline: none;
+                }
+                .ai-input-area button {
+                    background: #007acc; color: #fff; border: none; padding: 0 15px;
+                    border-radius: 4px; cursor: pointer;
+                }
+                
+                /* Technical Analysis Form */
+                #ai-tech-form {
+                    display: flex; padding: 20px; flex-direction: column; gap: 15px;
+                    align-items: center; justify-content: center; height: 100%;
+                }
+                #ai-tech-form input {
+                    width: 70%; padding: 10px; background: #333; border: 1px solid #444; 
+                    color: #fff; border-radius: 4px; text-align: center; font-size: 16px; text-transform: uppercase;
+                }
+                #ai-tech-form button {
+                    padding: 10px 30px; background: #28a745; color: #fff; border: none; 
+                    border-radius: 4px; cursor: pointer; font-size: 14px;
+                }
+
+                /* Markdown Content Styling */
+                .ai-message.model strong { color: #fff; font-weight: bold; }
+                .ai-message.model ul { margin: 5px 0 5px 20px; padding: 0; }
+                .ai-message.model li { margin-bottom: 2px; }
+
+                /* Typing Indicator */
+                .typing-indicator span {
+                    display: inline-block; width: 6px; height: 6px; background-color: #aaa;
+                    border-radius: 50%; animation: typing 1s infinite ease-in-out; margin: 0 2px;
+                }
+                .typing-indicator span:nth-child(1) { animation-delay: 0s; }
+                .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+                .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+                @keyframes typing {
+                    0% { transform: translateY(0); }
+                    50% { transform: translateY(-5px); }
+                    100% { transform: translateY(0); }
+                }
+            </style>
+
+            <div id="shs-ai-floating-icon">
+                <img src="${aiIconSrc}" alt="AI">
+            </div>
+
+            <div id="shs-ai-chat-window">
+                <div class="ai-header">
+                    <div>AI Assistant</div>
+                    <div class="ai-controls">
+                        <span id="btn-ai-expand" title="Mở rộng">⛶</span>
+                        <span id="btn-ai-close" title="Thu nhỏ">✖</span>
+                    </div>
+                </div>
+                <div class="ai-tabs">
+                    <div class="ai-tab active" data-mode="chat">Chat Tự Do</div>
+                    <div class="ai-tab" data-mode="technical">Phân Tích Kỹ Thuật</div>
+                </div>
+
+                <!-- Chat Mode Body -->
+                <div id="ai-body-chat" class="ai-body">
+                    <div class="ai-message model">Xin chào! Em là trợ lý ảo SH Smart. Anh/chị cần giúp gì hôm nay?</div>
+                </div>
+                
+                <!-- Technical Mode Body -->
+                <div id="ai-body-tech" class="ai-body" style="display: none;">
+                    <div id="ai-tech-form" style="text-align: center;">
+                        <div style="font-size: 40px; margin-bottom: 20px;">📈</div>
+                        <h3 style="color: #fff; margin: 0 0 10px 0;">Phân Tích Kỹ Thuật AI</h3>
+                        <p style="color: #aaa; font-size: 13px; margin: 0 0 20px 0; line-height: 1.5; padding: 0 20px;">
+                            Nhập mã chứng khoán để nhận phân tích chi tiết về xu hướng, dòng tiền và điểm mua/bán dựa trên dữ liệu kỹ thuật thực tế.
+                        </p>
+                        <input type="text" id="inp-tech-symbol" placeholder="Nhập mã (VD: HPG)" maxlength="3" style="margin-bottom: 15px;">
+                        <button id="btn-analyze">🔍 Phân Tích Ngay</button>
+                        <div style="font-size: 11px; color: #666; margin-top: 15px;">
+                            Dữ liệu được lấy từ Realtime Quote & TradingView History
+                        </div>
+                    </div>
+                    <div id="ai-tech-result" style="display: none; flex-direction: column; gap: 10px;">
+                        <!-- Results go here -->
+                    </div>
+                </div>
+
+                <div class="ai-input-area" id="ai-input-area">
+                    <input type="text" id="inp-ai-chat" placeholder="Nhập tin nhắn..." autocomplete="off">
+                    <button id="btn-ai-send">Gửi</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(container);
+
+        // --- Logic ---
+        const icon = document.getElementById('shs-ai-floating-icon');
+        const win = document.getElementById('shs-ai-chat-window');
+        const btnClose = document.getElementById('btn-ai-close');
+
+        // Restore History
+        ipcRenderer.invoke('get-chat-history').then(history => {
+            if (history && history.length > 0) {
+                history.forEach(item => {
+                    const text = item.parts[0].text;
+                    appendMsg(item.role, text);
+                });
+            }
+        });
+
+
+
+        let isExpanded = false;
+        let isTechActive = false; // Track if Tech Analysis is running or showing results
+
+        icon.onclick = () => {
+            if (win.style.display === 'flex') {
+                win.style.display = 'none';
+            } else {
+                win.style.display = 'flex';
+                document.getElementById('inp-ai-chat').focus();
+            }
+        };
+
+        btnClose.onclick = () => {
+            win.style.display = 'none';
+            // icon.style.display = 'flex'; // Not needed since we don't hide it
+        };
+
+        document.getElementById('btn-ai-expand').onclick = () => {
+            isExpanded = !isExpanded;
+            if (isExpanded) win.classList.add('modal-mode');
+            else win.classList.remove('modal-mode');
+        };
+
+        // Tabs
+        const tabs = document.querySelectorAll('.ai-tab');
+        tabs.forEach(t => t.onclick = () => {
+            tabs.forEach(x => x.classList.remove('active'));
+            t.classList.add('active');
+
+            const mode = t.getAttribute('data-mode');
+            if (mode === 'chat') {
+                document.getElementById('ai-body-chat').style.display = 'flex';
+                document.getElementById('ai-body-tech').style.display = 'none';
+                document.getElementById('ai-input-area').style.display = 'flex';
+            } else {
+                document.getElementById('ai-body-chat').style.display = 'none';
+                document.getElementById('ai-body-tech').style.display = 'flex';
+
+                // Ensure form is visible and result is hidden when switching back
+                document.getElementById('ai-tech-form').style.display = 'flex';
+                document.getElementById('ai-tech-result').style.display = 'none';
+
+                document.getElementById('ai-input-area').style.display = 'none';
+                document.getElementById('inp-tech-symbol').focus();
+            }
+        });
+
+        // Chat Logic
+        const inpChat = document.getElementById('inp-ai-chat');
+        const btnSend = document.getElementById('btn-ai-send');
+        const bodyChat = document.getElementById('ai-body-chat');
+
+        const appendMsg = (role, text) => {
+            const div = document.createElement('div');
+            div.className = `ai-message ${role}`;
+            let html = text
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\n\s*-\s/g, '<br>• ')
+                .replace(/\n/g, '<br>');
+            div.innerHTML = html;
+            bodyChat.appendChild(div);
+            bodyChat.scrollTop = bodyChat.scrollHeight;
+        };
+
+        const handleSend = async () => {
+            const text = inpChat.value.trim();
+            if (!text) return;
+
+            appendMsg('user', text);
+            inpChat.value = '';
+
+            // Show Typing Indicator
+            const typingDiv = document.createElement('div');
+            typingDiv.className = 'ai-message model typing-indicator';
+            typingDiv.innerHTML = '<span></span><span></span><span></span>';
+            bodyChat.appendChild(typingDiv);
+            bodyChat.scrollTop = bodyChat.scrollHeight;
+
+            try {
+                const response = await ipcRenderer.invoke('ai-chat-request', { message: text, type: 'chat' });
+                // Remove typing indicator
+                if (typingDiv.parentNode) typingDiv.parentNode.removeChild(typingDiv);
+                appendMsg('model', response);
+            } catch (e) {
+                if (typingDiv.parentNode) typingDiv.parentNode.removeChild(typingDiv);
+                console.error("AI Chat Error:", e);
+                appendMsg('model', 'Đã xảy ra lỗi kết nối: ' + e.message);
+            }
+        };
+
+        btnSend.onclick = handleSend;
+        inpChat.onkeydown = (e) => {
+            if (e.key === 'Enter') handleSend();
+        };
+
+        // Tech Analysis Logic
+        const btnAnalyze = document.getElementById('btn-analyze');
+        const inpSymbol = document.getElementById('inp-tech-symbol');
+        const techResultDiv = document.getElementById('ai-tech-result');
+        const techForm = document.getElementById('ai-tech-form');
+
+        btnAnalyze.onclick = async () => {
+            const symbol = inpSymbol.value.trim().toUpperCase();
+            if (!symbol) return;
+
+            isTechActive = true; // Mark as active
+            techForm.style.display = 'none';
+            techResultDiv.style.display = 'flex';
+            isTechActive = true;
+
+            // Helper to update status
+            const updateStatus = (msg, step) => {
+                techResultDiv.innerHTML = `
+                    <div class="ai-message model" style="text-align: center;">
+                        <h3 style="margin-bottom: 20px;">Đang xử lý phân tích ${symbol}</h3>
+                        <div style="display: flex; flex-direction: column; gap: 10px; align-items: flex-start; margin: 0 auto; width: fit-content;">
+                            <div style="color: ${step >= 1 ? '#4caf50' : '#ccc'}">
+                                ${step >= 1 ? '✅' : '⏳'} Lấy dữ liệu giá realtime
+                            </div>
+                            <div style="color: ${step >= 2 ? '#4caf50' : '#ccc'}">
+                                ${step >= 2 ? '✅' : '⏳'} Lấy chỉ số kỹ thuật (RSI, MAK...)
+                            </div>
+                            <div style="color: ${step >= 3 ? '#4caf50' : '#ccc'}">
+                                ${step >= 3 ? '✅' : '⏳'} Lấy lịch sử giá quá khứ
+                            </div>
+                            <div style="color: ${step >= 4 ? '#4caf50' : '#ccc'}">
+                                ${step >= 4 ? '🤖' : '⏳'} ${msg}
+                            </div>
+                        </div>
+                        <div class="typing-indicator" style="margin-top: 20px; justify-content: center; display: flex;">
+                             <span></span><span></span><span></span>
+                        </div>
+                    </div>`;
+            };
+
+            updateStatus("Đang khởi tạo...", 0);
+
+            try {
+                // Fetch context sequentially to show progress (or Promise.all but update UI in between? No, sequential/parallel mix is fine, but sequential is better for UX feedback)
+                // Actually parallel is faster. Let's do parallel but with "done" flags?
+                // For simplicity and clear steps, let's fetch sequentially or in groups.
+                // Fetching is fast enough (<1s). The AI part is the slow one.
+
+                const to = Math.floor(Date.now() / 1000);
+                const from = to - (40 * 24 * 60 * 60);
+
+                // Step 1: Realtime
+                const infoRes = await fetch(`https://shsmart.shs.com.vn/api/v1/finance/stockInfos?symbol=${symbol}`);
+                const infoData = await infoRes.json();
+                updateStatus("Đang lấy chỉ số kỹ thuật...", 1);
+
+                // Step 2: TA Rating
+                const taRes = await fetch(`https://shsmart.shs.com.vn/api/v1/finance/stock-ta-rating?symbol=${symbol}`);
+                const taData = await taRes.json();
+                updateStatus("Đang lấy lịch sử giá...", 2);
+
+                // Step 3: History
+                const histRes = await fetch(`https://shsmart.shs.com.vn/api/v1/tradingview/history?symbol=${symbol}&resolution=1D&from=${from}&to=${to}`);
+                const histData = await histRes.json();
+                updateStatus("AI đang phân tích dữ liệu...", 3);
+
+                const context = {
+                    symbol,
+                    price: infoData[0]?.lastPrice ? infoData[0].lastPrice * 1000 : 'N/A',
+                    change: infoData[0]?.priceChange,
+                    percent: infoData[0]?.priceChangePercent * 100,
+                    quote: infoData[0],
+                    indicators: taData,
+                    history: []
+                };
+
+                if (histData && histData.t) {
+                    context.history = histData.t.map((t, i) => ({
+                        time: t,
+                        open: histData.o[i],
+                        high: histData.h[i],
+                        low: histData.l[i],
+                        close: histData.c[i],
+                        volume: histData.v[i]
+                    }));
+                }
+
+                // Step 4: AI Request
+                updateStatus("AI đang suy nghĩ và viết báo cáo...", 4);
+
+                const response = await ipcRenderer.invoke('ai-chat-request', {
+                    type: 'technical',
+                    contextData: context
+                });
+
+                techResultDiv.innerHTML = '';
+                const resDiv = document.createElement('div');
+                resDiv.className = 'ai-message model';
+
+                let html = response
+                    .replace(/\*\*(.*?)\*\*/g, '<strong style="color: #ffd700;">$1</strong>')
+                    .replace(/### (.*?)\n/g, '<h4 style="margin: 10px 0 5px 0;">$1</h4>')
+                    .replace(/\n/g, '<br>');
+
+                resDiv.innerHTML = html;
+
+                const btnReset = document.createElement('button');
+                btnReset.innerText = "Phân tích mã khác";
+                btnReset.style.cssText = "padding: 8px 16px; background: #444; color: #fff; border: none; cursor: pointer; border-radius: 4px;";
+                btnReset.onclick = () => {
+                    isTechActive = false; // Reset state
+                    isTechActive = false;
+                    techResultDiv.style.display = 'none';
+                    techForm.style.display = 'flex';
+                    inpSymbol.value = '';
+                    inpSymbol.focus();
+                };
+
+                const btnCopy = document.createElement('button');
+                btnCopy.innerText = "📋 Sao chép kết quả";
+                btnCopy.style.cssText = "padding: 8px 16px; background: #007acc; color: #fff; border: none; cursor: pointer; border-radius: 4px;";
+                btnCopy.onclick = () => {
+                    // Clean Markdown for clipboard
+                    const cleanText = response
+                        .replace(/\*\*/g, '') // Remove bold
+                        .replace(/### /g, '\n👉 ') // Header to bullet
+                        .replace(/\n\n/g, '\n') // Remove extra lines
+                        .replace(/`/g, '') // Remove code ticks
+                        .trim();
+
+                    navigator.clipboard.writeText(cleanText).then(() => {
+                        const originalText = btnCopy.innerText;
+                        btnCopy.innerText = "Đã sao chép!";
+                        setTimeout(() => { btnCopy.innerText = originalText; }, 2000);
+                    });
+                };
+
+                const buttonsDiv = document.createElement('div');
+                buttonsDiv.style.cssText = "display: flex; gap: 10px; margin-top: 20px; align-self: center;";
+                buttonsDiv.appendChild(btnCopy);
+                buttonsDiv.appendChild(btnReset);
+
+                techResultDiv.appendChild(resDiv);
+                techResultDiv.appendChild(buttonsDiv);
+
+            } catch (e) {
+                techResultDiv.innerHTML = `<div class="ai-message model" style="color: red;">Lỗi khi lấy dữ liệu: ${e.message}</div>`;
+                const btnRetry = document.createElement('button');
+                btnRetry.innerText = "Thử lại";
+                btnRetry.onclick = () => { btnAnalyze.click(); }; // Retry
+                techResultDiv.appendChild(btnRetry);
+            }
+        };
+
+        inpSymbol.onkeydown = (e) => {
+            if (e.key === 'Enter') btnAnalyze.click();
+        };
+    }
 
 });

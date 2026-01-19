@@ -128,6 +128,52 @@ function setConfig(key, value) {
     ipcRenderer.invoke('set-general-setting', { key, value });
 }
 
+// --- AI Settings ---
+const chkAi = document.getElementById('chk-ai-enable');
+const inpAiKey = document.getElementById('inp-ai-key');
+
+// Load AI Config
+ipcRenderer.invoke('get-general-settings').then(config => {
+    if (config.aiEnabled) chkAi.checked = true;
+    // Don't show raw key if possible, or show placeholder?
+    // Actually showing asterisks is fine, value is needed to edit.
+    // We will fetch the decrypted key (or just the ciphertext and main handles it? No, renderer needs to show something).
+    // For security, maybe don't fill it? Or fill mask?
+    // Let's rely on 'get-general-settings' returning the raw config.
+    // If config.aiApiKey is encrypted, we can't show it easily without password.
+    // Wait, requirement: "API sau khi nhập sẽ dc mã hóa và lưu trong ứng dụng".
+    // If we use app secret, we can decrypt it here to show (masked).
+    // Let's assume Main decrypts it before sending "get-general-settings"? Or we have a specific 'get-ai-config'.
+    // Let's use a specific handler to keep it safe.
+});
+
+// Fetch AI Config specifically
+ipcRenderer.invoke('get-ai-config').then(res => {
+    if (res.apiKey) inpAiKey.value = res.apiKey;
+});
+
+chkAi.onchange = (e) => {
+    setConfig('aiEnabled', e.target.checked);
+};
+
+// Button Click Handlers
+document.getElementById('btn-save-ai-key').onclick = () => {
+    const val = inpAiKey.value.trim();
+    if (val) {
+        ipcRenderer.invoke('set-ai-key', val);
+        alert('Đã lưu API Key thành công!');
+    } else {
+        alert('Vui lòng nhập Key trước khi lưu.');
+    }
+};
+
+document.getElementById('btn-clear-ai-key').onclick = () => {
+    if (confirm('Bạn có chắc muốn xóa Key?')) {
+        inpAiKey.value = '';
+        ipcRenderer.invoke('set-ai-key', '');
+    }
+};
+
 // Init immediately
 initGeneralSettings();
 
