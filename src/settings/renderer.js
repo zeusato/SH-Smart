@@ -44,6 +44,12 @@ function initGeneralSettings() {
         }
     });
 
+    // Load App Version
+    ipcRenderer.invoke('get-app-version').then(ver => {
+        const el = document.getElementById('app-version');
+        if (el) el.innerText = ver;
+    });
+
     // Bind Events
     chkTop.onchange = (e) => setConfig('alwaysOnTop', e.target.checked);
     chkTray.onchange = (e) => setConfig('closeToTray', e.target.checked);
@@ -56,8 +62,8 @@ function initGeneralSettings() {
     btnClear.onclick = async () => {
         if (confirm('Bạn có chắc muốn xóa cache và tải lại trang?')) {
             await ipcRenderer.invoke('clear-cache');
-            ipcRenderer.send('save-settings', { action: 'reload' }); // Optional logic to reload main window
-            alert('Đã xóa cache. Vui lòng đóng và mở lại ứng dụng hoặc trang chính.');
+            ipcRenderer.send('save-settings', { action: 'reload' });
+            // alert('Đã xóa cache...'); // Removed to prevent focus issues
         }
     };
 }
@@ -193,31 +199,65 @@ document.getElementById('otp-file').addEventListener('change', async (e) => {
 });
 
 function parseOcrResult(text) {
-    const cleanText = text.replace(/[^0-9\s]/g, ' ');
-    const pairRegex = /\b(\d{1,2})\s*(\d{4})\b/g;
+    // 1. Tokenize: Extract all number-like strings
+    // We split by non-digit characters to get pure numbers
+    const tokens = text.match(/\b\d+\b/g);
 
-    let match;
+    if (!tokens || tokens.length === 0) {
+        console.warn('No numbers found in OCR text');
+        return;
+    }
+
+    console.log('OCR Tokens:', tokens);
+
+    const pendingIndices = [];
     const found = {};
     let foundCount = 0;
 
-    while ((match = pairRegex.exec(cleanText)) !== null) {
-        const idx = parseInt(match[1]);
-        const code = match[2];
+    tokens.forEach(token => {
+        const num = parseInt(token);
 
-        if (idx >= 1 && idx <= 35) {
-            if (!found[idx]) {
-                found[idx] = code;
-                foundCount++;
+        // Check if it's a valid index (1-35)
+        // We exclude numbers that look like codes (e.g. 2024 is > 35)
+        // Note: A code like "0012" might parse as 12. 
+        // We assume codes are typically 4 digits >= 1000 or have leading zeros preserved in string if we looked closer,
+        // but parseInt strips them.
+        // However, in the image, codes are 4 digits. Let's assume codes >= 100 if leading zeros sort of missing, but strictly the image shows 4 digits.
+        // Let's rely on string length for code detection if possible?
+        // But the token is string.
+
+        const isIndex = (num >= 1 && num <= 35);
+        const isCode = (token.length === 4 || (num >= 1000 && num <= 9999));
+
+        if (isIndex && !isCode) {
+            // It's an index, add to queue
+            // Prevent duplicate indices in queue if we want to be strict? 
+            // Better to just push, maybe the format is 1 1234 1 5678 (repeated index?) - unlikely.
+            // Just push.
+            pendingIndices.push(num);
+        } else if (isCode) {
+            // It's a code
+            if (pendingIndices.length > 0) {
+                // Assign to the oldest pending index (FIFO for "Row of Indices... Row of Codes" or "Index Code")
+                const idx = pendingIndices.shift();
+                if (!found[idx]) {
+                    found[idx] = token;
+                    foundCount++;
+                }
+            } else {
+                // Found a code but no index? 
+                // Could be noise, or maybe structure is mismatched.
+                // Ignore for now.
             }
         }
-    }
+    });
 
     otpData.codes = new Array(35).fill('');
     Object.keys(found).forEach(idx => {
         otpData.codes[idx - 1] = found[idx];
     });
 
-    console.log(`Parsed ${foundCount} pairs.`);
+    console.log(`Parsed ${foundCount} pairs using Queue Strategy.`);
     renderGridPreview();
 }
 
@@ -250,12 +290,16 @@ function renderGridPreview() {
 }
 
 // 2. Save OTP
+// 2. Save OTP
 document.getElementById('btn-save-otp').addEventListener('click', async () => {
     const name = document.getElementById('otp-name').value;
     const password = document.getElementById('otp-password').value;
+    const errorWith = document.getElementById('save-error-msg');
+    errorWith.style.display = 'none';
 
     if (!name || !password) {
-        alert('Vui lòng nhập tên và mật khẩu!');
+        errorWith.textContent = 'Vui lòng nhập đầy đủ tên và mật khẩu!';
+        errorWith.style.display = 'block';
         return;
     }
 
@@ -271,11 +315,13 @@ document.getElementById('btn-save-otp').addEventListener('click', async () => {
     });
 
     if (result.success) {
-        alert('Đã lưu thẻ OTP thành công!');
+        // Use a small toast or just reset
         cancelAddOtp();
         loadOtpList();
+        // Optional: show a small 'Saved' toast if we had one, but list update is visual enough.
     } else {
-        alert('Lỗi lưu: ' + result.error);
+        errorWith.textContent = 'Lỗi lưu: ' + result.error;
+        errorWith.style.display = 'block';
     }
 });
 
@@ -285,47 +331,79 @@ async function showOtpDetail(id, name) {
     console.log('showOtpDetail called for:', id, name);
 
     try {
-        const password = await requestPassword(name);
+        // Fetch encrypted data once
         const result = await ipcRenderer.invoke('get-otp-card-enc', id);
-        if (!result) { alert("Lỗi tải thẻ"); return; }
+        if (!result) throw new Error("Không tìm thấy dữ liệu thẻ");
 
-        const bytes = CryptoJS.AES.decrypt(result.data, password);
-        const decryptedStr = bytes.toString(CryptoJS.enc.Utf8);
+        // Validator function to check password
+        const validator = (password) => {
+            try {
+                const bytes = CryptoJS.AES.decrypt(result.data, password);
+                const decryptedStr = bytes.toString(CryptoJS.enc.Utf8);
+                if (!decryptedStr) return null; // Wrong password
+                return JSON.parse(decryptedStr); // Success: return codes
+            } catch (e) {
+                return null; // Decrypt failed
+            }
+        };
 
-        if (!decryptedStr) {
-            alert('Mật khẩu sai!');
-            return;
-        }
+        const codes = await requestPassword(name, validator);
 
-        const codes = JSON.parse(decryptedStr);
+        // If we get here, password was correct and we have codes
         await ipcRenderer.invoke('unlock-otp-card', { cardId: id, codes });
         showUnlockedDetail(name, codes);
 
     } catch (e) {
         if (e !== 'CANCEL') {
             console.error(e);
-            alert('Mật khẩu sai hoặc file lỗi!');
+            // Use a toast or non-blocking UI for fatal errors
+            // alert('Lỗi: ' + e.message); 
+            // Better: update the UI placeholder
+            document.getElementById('otp-placeholder').innerHTML = `<p style="color:red">Lỗi: ${e.message}</p>`;
+            document.getElementById('otp-placeholder').style.display = 'block';
         }
     }
 }
 
-function requestPassword(cardName) {
+function requestPassword(cardName, validatorFn) {
     return new Promise((resolve, reject) => {
         const modal = document.getElementById('password-modal');
         const input = document.getElementById('modal-password-input');
+        const errorMsg = document.getElementById('modal-error-msg');
         const btnConfirm = document.getElementById('btn-modal-confirm');
         const btnCancel = document.getElementById('btn-modal-cancel');
 
         modal.querySelector('h3').textContent = `Nhập mật khẩu cho thẻ "${cardName}"`;
         input.value = '';
+        errorMsg.style.display = 'none';
         modal.style.display = 'flex';
         input.focus();
 
-        const onConfirm = () => {
-            const val = input.value;
-            if (val) {
+        const cleanup = () => {
+            modal.style.display = 'none';
+            btnConfirm.onclick = null;
+            btnCancel.onclick = null;
+            input.onkeyup = null;
+        };
+
+        const onConfirm = async () => {
+            const password = input.value;
+            if (!password) return;
+
+            // Validate
+            const codes = validatorFn(password);
+            if (codes) {
                 cleanup();
-                resolve(val);
+                resolve(codes);
+            } else {
+                // Show error, keep modal open
+                errorMsg.textContent = 'Mật khẩu không đúng!';
+                errorMsg.style.display = 'block';
+                input.value = '';
+                // Hack: Blur then focus to ensure caret reappears
+                ipcRenderer.send('focus-settings');
+                input.blur();
+                setTimeout(() => input.focus(), 100);
             }
         };
 
@@ -334,25 +412,13 @@ function requestPassword(cardName) {
             reject('CANCEL');
         };
 
-        const onKeyup = (e) => {
+        btnConfirm.onclick = onConfirm;
+        btnCancel.onclick = onCancel;
+
+        input.onkeyup = (e) => {
             if (e.key === 'Enter') onConfirm();
             if (e.key === 'Escape') onCancel();
         };
-
-        const cleanup = () => {
-            modal.style.display = 'none';
-            btnConfirm.removeEventListener('click', onConfirm);
-            btnCancel.removeEventListener('click', onCancel);
-            input.removeEventListener('keyup', onKeyup);
-        };
-
-        const confirmHandler = () => onConfirm();
-        const cancelHandler = () => onCancel();
-        const keyupHandler = (e) => onKeyup(e);
-
-        btnConfirm.onclick = confirmHandler;
-        btnCancel.onclick = cancelHandler;
-        input.onkeyup = keyupHandler;
     });
 }
 

@@ -259,3 +259,29 @@ h3 {
     border: 1px solid #444;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
+
+/* Shortcuts Table */
+.shortcuts-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.shortcuts-table tr {
+    border-bottom: 1px solid #333;
+}
+
+.shortcuts-table td {
+    padding: 10px 8px;
+    font-size: 14px;
+}
+
+.shortcuts-table .key {
+    width: 60px;
+    background: #007acc;
+    color: #fff;
+    font-weight: bold;
+    text-align: center;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 13px;
+}

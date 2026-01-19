@@ -1,5 +1,6 @@
 const { app, BrowserWindow, shell, dialog, ipcMain, Tray, Menu } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
 
@@ -41,6 +42,7 @@ function setupAutoUpdater() {
 // Keep global references of the window objects to prevent garbage collection
 let mainWindow;
 let splashWindow;
+let settingsWindow = null;
 let tray = null;
 let config = {
   alwaysOnTop: false,
@@ -249,7 +251,15 @@ if (!gotTheLock) {
     });
 
     // --- General Settings IPCs ---
+    ipcMain.handle('get-app-version', () => app.getVersion());
     ipcMain.handle('get-general-settings', () => config);
+
+    ipcMain.on('focus-settings', () => {
+      if (settingsWindow) {
+        settingsWindow.show(); // Ensure visible
+        settingsWindow.focus(); // Force focus
+      }
+    });
 
     ipcMain.handle('set-general-setting', (event, { key, value }) => {
       config[key] = value;
@@ -298,7 +308,7 @@ if (!gotTheLock) {
     });
   }
 
-  let settingsWindow;
+
   function createSettingsWindow() {
     if (settingsWindow) {
       settingsWindow.focus();
@@ -353,6 +363,15 @@ if (!gotTheLock) {
   const otpSession = {};
   const SESSION_DURATION = 8 * 60 * 60 * 1000; // 8 hours
 
+  // Allow Renderer to cache the unlocked codes after validating password
+  ipcMain.handle('unlock-otp-card', (event, { cardId, codes }) => {
+    otpSession[cardId] = {
+      codes: codes,
+      expiry: Date.now() + SESSION_DURATION
+    };
+    return { success: true };
+  });
+
   ipcMain.handle('attempt-unlock-otp', (event, { cardId, password }) => {
     try {
       if (!fs.existsSync(otpFilePath)) return { success: false, error: 'File data not found' };
@@ -363,8 +382,14 @@ if (!gotTheLock) {
       if (!card) return { success: false, error: 'Card not found' };
 
       // Decrypt
-      const bytes = CryptoJS.AES.decrypt(card.data, password);
-      const decryptedStr = bytes.toString(CryptoJS.enc.Utf8);
+      let decryptedStr;
+      try {
+        const bytes = CryptoJS.AES.decrypt(card.data, password);
+        decryptedStr = bytes.toString(CryptoJS.enc.Utf8);
+      } catch (e) {
+        // Malformed UTF-8 data usually means wrong password
+        return { success: false, error: 'Sai mật khẩu' };
+      }
 
       if (!decryptedStr) {
         return { success: false, error: 'Sai mật khẩu' };
@@ -448,18 +473,6 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('unlock-otp-card', (event, { cardId, codes }) => {
-    // The renderer sends us the DECRYPTED codes after verifying password there?
-    // OR renderer sends password and we decrypt?
-    // Better: Renderer does the decryption (CPU intensive) and sends us the clean codes to cache in session.
-    // Security trade-off: IPC sends plain codes. acceptable for local app.
-    otpSession[cardId] = {
-      codes: codes, // Array of 35 strings
-      expiry: Date.now() + SESSION_DURATION
-    };
-    return true;
-  });
-
   ipcMain.handle('request-otp-code', (event, { cardId, index }) => {
     // Check session
     const session = otpSession[cardId];
@@ -497,6 +510,20 @@ if (!gotTheLock) {
       settingsWindow.webContents.send('switch-tab', 'otp');
     }
   });
+
+  ipcMain.handle('get-app-icon', () => {
+    try {
+      const iconPath = path.join(getAssetPath(), 'icon.png');
+      if (fs.existsSync(iconPath)) {
+        return fs.readFileSync(iconPath).toString('base64');
+      }
+    } catch (e) {
+      log.error('Error loading icon:', e);
+    }
+    return null;
+  });
+
+
 
 } // End of Single Instance Lock ELSE block
 

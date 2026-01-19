@@ -15,6 +15,7 @@
         <div class="sidebar-header">MENU</div>
         <div class="nav-item active" data-tab="general">Chung (General)</div>
         <div class="nav-item" data-tab="otp">Quản lý OTP</div>
+        <div class="nav-item" data-tab="shortcuts">Phím tắt</div>
         <div class="nav-item" data-tab="about">Thông tin</div>
     </div>
 
@@ -86,12 +87,72 @@
                             <h4>Kết quả nhận diện:</h4>
                             <div id="otp-grid-preview"></div>
                         </div>
+                        <div id="save-error-msg"
+                            style="color: #e74c3c; font-size: 13px; margin-bottom: 10px; display: none;"></div>
                         <div style="margin-top: 15px;">
                             <button class="btn" id="btn-save-otp" disabled>Lưu Thẻ</button>
                             <button class="btn" style="background: #444;" onclick="cancelAddOtp()">Hủy</button>
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <div id="tab-shortcuts" class="tab-content" style="display: none;">
+            <h2>Phím tắt (Keyboard Shortcuts)</h2>
+            <div class="settings-group">
+                <h3>Điều hướng Menu</h3>
+                <table class="shortcuts-table">
+                    <tr>
+                        <td class="key">F1</td>
+                        <td>Bảng giá</td>
+                    </tr>
+                    <tr>
+                        <td class="key">F2</td>
+                        <td>Thị trường</td>
+                    </tr>
+                    <tr>
+                        <td class="key">F3</td>
+                        <td>Giao dịch</td>
+                    </tr>
+                    <tr>
+                        <td class="key">F4</td>
+                        <td>Tài sản</td>
+                    </tr>
+                    <tr>
+                        <td class="key">F5</td>
+                        <td>Quản lý tiền</td>
+                    </tr>
+                    <tr>
+                        <td class="key">F6</td>
+                        <td>Báo cáo</td>
+                    </tr>
+                    <tr>
+                        <td class="key">F7</td>
+                        <td>Quản lý dịch vụ</td>
+                    </tr>
+                </table>
+            </div>
+            <div class="settings-group">
+                <h3>Chức năng nhanh</h3>
+                <table class="shortcuts-table">
+                    <tr>
+                        <td class="key">F8</td>
+                        <td>Trung tâm thông báo (Notification)</td>
+                    </tr>
+                    <tr>
+                        <td class="key">F9</td>
+                        <td>Tìm kiếm mã chứng khoán</td>
+                    </tr>
+                </table>
+            </div>
+            <div class="settings-group">
+                <h3>Mẹo sử dụng</h3>
+                <p style="color: #aaa; font-size: 13px; line-height: 1.6;">
+                    • Khi website yêu cầu mã OTP, hệ thống tự động hiển thị mã nếu thẻ đã mở khóa.<br>
+                    • Nếu thẻ chưa mở khóa, popup nhập mật khẩu sẽ xuất hiện.<br>
+                    • Mã OTP hiển thị dạng Toast lớn ở giữa màn hình trong 5 giây.
+                </p>
             </div>
         </div>
 
@@ -115,6 +176,8 @@
             <h3>Nhập mật khẩu thẻ</h3>
             <div class="form-group">
                 <input type="password" id="modal-password-input" placeholder="Mật khẩu bảo vệ...">
+                <div id="modal-error-msg" class="error-msg"
+                    style="display:none; margin-top: 5px; color: #ff5555; font-size: 13px;"></div>
             </div>
             <div style="display: flex; justify-content: flex-end; gap: 10px;">
                 <button class="btn" style="background: #555;" id="btn-modal-cancel">Hủy</button>
