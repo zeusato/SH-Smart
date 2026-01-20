@@ -153,7 +153,19 @@ ipcRenderer.invoke('get-ai-config').then(res => {
 });
 
 chkAi.onchange = (e) => {
-    setConfig('aiEnabled', e.target.checked);
+    const isChecked = e.target.checked;
+
+    // Check if turning ON
+    if (isChecked) {
+        const currentKey = inpAiKey.value.trim();
+        if (!currentKey) {
+            alert('Vui lòng nhập API Key trước khi bật tính năng AI.');
+            e.target.checked = false; // Revert UI
+            return;
+        }
+    }
+
+    setConfig('aiEnabled', isChecked);
 };
 
 // Button Click Handlers

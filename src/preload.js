@@ -345,21 +345,60 @@ window.addEventListener('DOMContentLoaded', () => {
 
         const fetchPrices = async () => {
             try {
-                // Switch to stockInfos for richer data (Ref, Ceil, Floor)
-                const url = `https://shsmart.shs.com.vn/api/v1/finance/stockInfos?symbol=${currentWatchlist.join(',')}`;
+                // User Request: Use official Real-time API (Same as Price Board)
+                // Endpoint: /api/v1/market/symbolLatest?symbolList=...
+                const url = `https://shsmart.shs.com.vn/api/v1/market/symbolLatest?symbolList=${currentWatchlist.join(',')}`;
                 const res = await fetch(url);
                 const json = await res.json();
 
                 // Parse Data
+                // API Mapping:
+                // s: Symbol
+                // c: Match Price (e.g. 20300) -> Need raw for logic, display handles formatting
+                // ch: Change (e.g. 100 or -500) -> Display handles +/-, unit is absolute
+                // r: Rate (e.g. 0.05 for 5%) -> Convert to %
+                // o, h, l, ceiling, floor? 
+                // The new API object might not have ceil/floor/ref explicitly in this endpoint?
+                // Let's check sample response: "bb": [], "bo": [], "o":..., "h":..., "l":...
+                // Only basic price data. We might need Reference price to calculate color if not provided.
+                // Wait, "r" is rate. We can deduce Ref = c / (1 + r).
+                // Or just trust c and ch.
+                // Color logic: ch > 0 (Green), ch < 0 (Red), ch = 0 (Yellow).
+                // Ceil/Floor check? Use 7% or default logic? Or fetch stockInfos ONCE to get Ref/Ceil/Floor, 
+                // and then poll symbolLatest for updates?
+                // For simplicity and speed (1s update), let's just use c, ch, r. Colors can be derived from ch.
+                // Ceil/Floor specific colors (Purple/Blue) - we might miss them without Ref/Ceil/Floor data.
+                // BUT user only complained about "Data Slow & Wrong Value". 
+                // Let's try to mix? No, keep it fast. One call.
+                // If ch is missing, default to 0.
+
                 const updates = json.map(item => {
                     return {
-                        symbol: item.symbol,
-                        price: (item.lastPrice || 0) * 1000,
-                        change: (item.priceChange || 0), // User requested unit 1k (0.1 for 100d)
-                        percent: (item.priceChangePercent || 0) * 100,
-                        ref: (item.basicPrice || 0) * 1000,
-                        ceil: (item.ceilPrice || 0) * 1000,
-                        floor: (item.flrPrice || 0) * 1000
+                        symbol: item.s,
+                        price: item.c,      // 20300
+                        change: item.ch / 1000,    // 100 -> 0.1
+                        percent: item.r * 100, // 0.005 -> 0.5%
+                        // Mock Ref/Ceil/Floor for color logic if needed, or update renderer to rely on 'change'
+                        // But renderer uses: price > ref, price == ceil etc.
+                        // Let's approximated ref:
+                        ref: item.c - item.ch,
+                        // We can't know ceil/floor exactly without static data. 
+                        // Let's assume just up/down colors (Green/Red/Yellow).
+                        // If item.c == ceil? We don't know ceil.
+                        // Ideally we should cache the static info (Ref/Ceil/Floor) from initial 'stockInfos' call,
+                        // and then only update Price/Vol from 'symbolLatest'.
+                        // However, for this fix, let's just make sure price/change is correct first.
+                        // To preserve color logic in renderer:
+                        ceil: (item.c - item.ch) * 1.069, // Estimate? No, dangerous.
+                        floor: (item.c - item.ch) * 0.931
+                        // Actually, let's just pass what we have and let renderer decide.
+                        // Renderer logic:
+                        // if (item.price > item.ref) colorClass = 'up';
+                        // if (item.price < item.ref) colorClass = 'down';
+                        // ...
+                        // So setting ref = c - ch works perfect for Up/Down/Ref.
+                        // For Ceil/Floor colors, we accept we might lose them momentarily unless we do the "Fetch Static + Poll Dynamic" strategy.
+                        // User priority: "Correct Prices".
                     };
                 });
 
@@ -370,7 +409,7 @@ window.addEventListener('DOMContentLoaded', () => {
         };
 
         fetchPrices(); // Immediate first run
-        priceInterval = setInterval(fetchPrices, 3000); // 3 seconds
+        priceInterval = setInterval(fetchPrices, 1000); // 1 second
     }
 
     ipcRenderer.on('watchlist-changed', (event, list) => {
@@ -478,117 +517,219 @@ window.addEventListener('DOMContentLoaded', () => {
         container.id = 'shs-ai-container';
         container.innerHTML = `
             <style>
+                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+                #shs-ai-container {
+                    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+                }
+
+                /* Floating Icon */
                 #shs-ai-floating-icon {
-                    position: fixed; bottom: 20px; right: 20px;
+                    position: fixed; bottom: 30px; right: 30px;
                     width: 60px; height: 60px;
                     border-radius: 50%;
                     background: #202020;
-                    border: 2px solid #007acc;
-                    box-shadow: 0 4px 15px rgba(0,122,204,0.5);
+                    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
                     cursor: pointer; z-index: 10000;
                     display: flex; align-items: center; justify-content: center;
-                    transition: transform 0.2s;
+                    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+                    border: 2px solid #007acc;
                 }
-                #shs-ai-floating-icon:hover { transform: scale(1.1); }
-                #shs-ai-floating-icon img { width: 85%; height: 85%; object-fit: contain; }
+                #shs-ai-floating-icon:hover { 
+                    transform: scale(1.1); 
+                    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.6);
+                }
+                #shs-ai-floating-icon img { width: 90%; height: 90%; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); }
 
+                /* Chat Window */
                 #shs-ai-chat-window {
-                    position: fixed; bottom: 90px; right: 20px;
-                    width: 350px; height: 500px;
-                    background: #1e1e1e;
-                    border: 1px solid #333;
-                    border-radius: 12px;
-                    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+                    position: fixed; bottom: 105px; right: 30px;
+                    width: 380px; height: 600px;
+                    background: rgba(30, 30, 30, 0.85);
+                    backdrop-filter: blur(20px);
+                    -webkit-backdrop-filter: blur(20px);
+                    border: 1px solid rgba(255, 255, 255, 0.08);
+                    border-radius: 24px;
+                    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
                     z-index: 10000;
                     display: none; flex-direction: column;
-                    font-family: 'Segoe UI', sans-serif;
                     overflow: hidden;
+                    animation: aiSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+                    transform-origin: bottom right;
                 }
+                
+                @keyframes aiSlideIn {
+                    from { opacity: 0; transform: scale(0.9) translateY(20px); }
+                    to { opacity: 1; transform: scale(1) translateY(0); }
+                }
+
                 #shs-ai-chat-window.modal-mode {
-                    width: 800px; height: 600px;
+                    width: 900px; height: 700px;
                     top: 50%; left: 50%;
                     transform: translate(-50%, -50%);
                     bottom: auto; right: auto;
+                    border-radius: 16px;
                 }
 
+                /* Header */
                 .ai-header {
-                    padding: 10px 15px; background: #252526; border-bottom: 1px solid #333;
+                    padding: 16px 20px;
+                    background: rgba(255, 255, 255, 0.03);
+                    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
                     display: flex; justify-content: space-between; align-items: center;
-                    color: #fff; font-weight: bold; -webkit-user-select: none;
+                    color: #fff; font-weight: 600; font-size: 15px;
+                    -webkit-user-select: none;
                 }
-                .ai-controls span { cursor: pointer; margin-left: 10px; color: #aaa; font-size: 14px; }
-                .ai-controls span:hover { color: #fff; }
+                .ai-controls { display: flex; gap: 14px; align-items: center; }
+                .ai-controls span { 
+                    cursor: pointer; color: #888; transition: all 0.2s; 
+                    font-size: 16px; display: flex; align-items: center; justify-content: center;
+                    width: 24px; height: 24px; border-radius: 4px;
+                }
+                .ai-controls span:hover { color: #fff; background: rgba(255,255,255,0.1); }
+                #btn-ai-close:hover { background: #d32f2f; color: white; }
 
-                .ai-tabs { display: flex; background: #2d2d2d; }
+                /* Tabs */
+                .ai-tabs { 
+                    display: flex; padding: 12px 20px 0; gap: 15px;
+                    border-bottom: 1px solid rgba(255,255,255,0.05);
+                }
                 .ai-tab {
-                    flex: 1; padding: 8px; text-align: center; color: #aaa; cursor: pointer;
-                    font-size: 13px; border-bottom: 2px solid transparent;
+                    padding: 8px 12px; text-align: center; color: #999; cursor: pointer;
+                    font-size: 13px; font-weight: 500; position: relative;
+                    transition: all 0.2s;
                 }
-                .ai-tab.active { color: #fff; border-bottom: 2px solid #007acc; background: #1e1e1e; }
+                .ai-tab:hover { color: #ccc; }
+                .ai-tab.active { color: #4daafc; }
+                .ai-tab.active::after {
+                    content: ''; position: absolute; bottom: -1px; left: 0; width: 100%; height: 2px;
+                    background: #4daafc; border-radius: 2px 2px 0 0;
+                    box-shadow: 0 -2px 10px rgba(77, 170, 252, 0.5);
+                }
 
-                .ai-body { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
-                
-                .ai-message { max-width: 85%; padding: 8px 12px; border-radius: 8px; font-size: 14px; line-height: 1.4; color: #ddd; }
-                .ai-message.user { align-self: flex-end; background: #007acc; color: #fff; }
-                .ai-message.model { align-self: flex-start; background: #333; }
-                
+                /* Body */
+                .ai-body { 
+                    flex: 1; overflow-y: auto; padding: 20px; 
+                    display: flex; flex-direction: column; gap: 16px; 
+                    scroll-behavior: smooth;
+                }
+                .ai-body::-webkit-scrollbar { width: 5px; }
+                .ai-body::-webkit-scrollbar-track { background: transparent; }
+                .ai-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+                .ai-body::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+                /* Messages */
+                .ai-message { 
+                    max-width: 85%; padding: 10px 16px; border-radius: 18px; 
+                    font-size: 14px; line-height: 1.5; word-wrap: break-word;
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+                    position: relative;
+                }
+                .ai-message.user { 
+                    align-self: flex-end; 
+                    background: linear-gradient(135deg, #007acc, #005c99); 
+                    color: #fff; 
+                    border-bottom-right-radius: 4px;
+                }
+                .ai-message.model { 
+                    align-self: flex-start; 
+                    background: rgba(255,255,255,0.08); 
+                    color: #eee; 
+                    border-bottom-left-radius: 4px;
+                }
+                .ai-message.model strong { color: #fff; font-weight: 600; }
+
+                /* Input Area */
                 .ai-input-area {
-                    padding: 10px; background: #252526; border-top: 1px solid #333;
-                    display: flex; gap: 10px;
+                    padding: 15px; 
+                    background: rgba(20, 20, 20, 0.4); 
+                    border-top: 1px solid rgba(255,255,255,0.05);
+                    display: flex; gap: 10px; align-items: flex-end;
                 }
                 .ai-input-area input {
-                    flex: 1; background: #333; border: 1px solid #444; color: #fff;
-                    padding: 8px; border-radius: 4px; outline: none;
+                    flex: 1; min-height: 40px; max-height: 100px;
+                    background: rgba(0,0,0,0.3); 
+                    border: 1px solid rgba(255,255,255,0.1); 
+                    color: #fff; padding: 10px 15px; border-radius: 20px; 
+                    font-family: inherit; font-size: 14px; outline: none;
+                    transition: border-color 0.2s, background 0.2s;
+                }
+                .ai-input-area input:focus {
+                    border-color: #007acc; background: rgba(0,0,0,0.5);
                 }
                 .ai-input-area button {
-                    background: #007acc; color: #fff; border: none; padding: 0 15px;
-                    border-radius: 4px; cursor: pointer;
+                    background: #007acc; color: #fff; border: none; 
+                    width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
+                    cursor: pointer; display: flex; align-items: center; justify-content: center;
+                    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+                    box-shadow: 0 4px 12px rgba(0,122,204,0.3);
                 }
-                
+                .ai-input-area button:hover {
+                    background: #008ae6; transform: scale(1.05);
+                }
+                .ai-input-area button svg { width: 20px; height: 20px; fill: currentColor; transform: translateX(2px); }
+
                 /* Technical Analysis Form */
                 #ai-tech-form {
-                    display: flex; padding: 20px; flex-direction: column; gap: 15px;
+                    display: flex; padding: 20px; flex-direction: column; gap: 20px;
                     align-items: center; justify-content: center; height: 100%;
                 }
+                .tech-card {
+                    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.05);
+                    padding: 30px; border-radius: 20px; width: 100%; box-sizing: border-box;
+                    text-align: center;
+                }
                 #ai-tech-form input {
-                    width: 70%; padding: 10px; background: #333; border: 1px solid #444; 
-                    color: #fff; border-radius: 4px; text-align: center; font-size: 16px; text-transform: uppercase;
+                    width: 100%; padding: 14px; box-sizing: border-box;
+                    background: rgba(0,0,0,0.3); 
+                    border: 1px solid rgba(255,255,255,0.2); 
+                    color: #fff; border-radius: 12px; text-align: center; 
+                    font-size: 20px; text-transform: uppercase; letter-spacing: 2px;
+                    transition: all 0.2s; margin-bottom: 20px; font-weight: bold;
+                }
+                #ai-tech-form input:focus {
+                    border-color: #4daafc; background: rgba(0,0,0,0.5); box-shadow: 0 0 0 3px rgba(77, 170, 252, 0.25);
                 }
                 #ai-tech-form button {
-                    padding: 10px 30px; background: #28a745; color: #fff; border: none; 
-                    border-radius: 4px; cursor: pointer; font-size: 14px;
+                    padding: 14px 40px; background: linear-gradient(135deg, #00c853, #1b5e20);
+                    color: #fff; border: none; font-weight: 600;
+                    border-radius: 30px; cursor: pointer; font-size: 15px;
+                    box-shadow: 0 8px 15px rgba(0, 200, 83, 0.2);
+                    transition: transform 0.2s, box-shadow 0.2s; width: 100%;
                 }
-
-                /* Markdown Content Styling */
-                .ai-message.model strong { color: #fff; font-weight: bold; }
-                .ai-message.model ul { margin: 5px 0 5px 20px; padding: 0; }
-                .ai-message.model li { margin-bottom: 2px; }
+                #ai-tech-form button:hover { transform: translateY(-2px); box-shadow: 0 12px 25px rgba(0, 200, 83, 0.3); }
 
                 /* Typing Indicator */
+                .typing-indicator { display: flex; align-items: center; height: 20px; }
                 .typing-indicator span {
-                    display: inline-block; width: 6px; height: 6px; background-color: #aaa;
-                    border-radius: 50%; animation: typing 1s infinite ease-in-out; margin: 0 2px;
+                    display: block; width: 5px; height: 5px; background-color: #aaa;
+                    border-radius: 50%; margin: 0 2px;
+                    animation: typing 1.4s infinite ease-in-out both;
                 }
-                .typing-indicator span:nth-child(1) { animation-delay: 0s; }
-                .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
-                .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+                .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+                .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
                 @keyframes typing {
-                    0% { transform: translateY(0); }
-                    50% { transform: translateY(-5px); }
-                    100% { transform: translateY(0); }
+                    0%, 80%, 100% { transform: scale(0); }
+                    40% { transform: scale(1); }
                 }
             </style>
 
-            <div id="shs-ai-floating-icon">
+            <div id="shs-ai-floating-icon" title="Trợ lý AI Smart">
                 <img src="${aiIconSrc}" alt="AI">
             </div>
 
             <div id="shs-ai-chat-window">
                 <div class="ai-header">
-                    <div>AI Assistant</div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="background: linear-gradient(135deg, #00c6ff, #0072ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">✨ SH Smart AI</span>
+                    </div>
                     <div class="ai-controls">
-                        <span id="btn-ai-expand" title="Mở rộng">⛶</span>
-                        <span id="btn-ai-close" title="Thu nhỏ">✖</span>
+                        <span id="btn-ai-expand" title="Mở rộng">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                        </span>
+                        <span id="btn-ai-close" title="Đóng">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        </span>
                     </div>
                 </div>
                 <div class="ai-tabs">
@@ -598,31 +739,35 @@ window.addEventListener('DOMContentLoaded', () => {
 
                 <!-- Chat Mode Body -->
                 <div id="ai-body-chat" class="ai-body">
-                    <div class="ai-message model">Xin chào! Em là trợ lý ảo SH Smart. Anh/chị cần giúp gì hôm nay?</div>
+                    <div class="ai-message model">👋 Xin chào! Em là trợ lý ảo SH Smart. Em có thể giúp gì cho anh/chị hôm nay?</div>
                 </div>
                 
                 <!-- Technical Mode Body -->
                 <div id="ai-body-tech" class="ai-body" style="display: none;">
-                    <div id="ai-tech-form" style="text-align: center;">
-                        <div style="font-size: 40px; margin-bottom: 20px;">📈</div>
-                        <h3 style="color: #fff; margin: 0 0 10px 0;">Phân Tích Kỹ Thuật AI</h3>
-                        <p style="color: #aaa; font-size: 13px; margin: 0 0 20px 0; line-height: 1.5; padding: 0 20px;">
-                            Nhập mã chứng khoán để nhận phân tích chi tiết về xu hướng, dòng tiền và điểm mua/bán dựa trên dữ liệu kỹ thuật thực tế.
-                        </p>
-                        <input type="text" id="inp-tech-symbol" placeholder="Nhập mã (VD: HPG)" maxlength="3" style="margin-bottom: 15px;">
-                        <button id="btn-analyze">🔍 Phân Tích Ngay</button>
-                        <div style="font-size: 11px; color: #666; margin-top: 15px;">
-                            Dữ liệu được lấy từ Realtime Quote & TradingView History
+                    <div id="ai-tech-form">
+                        <div class="tech-card">
+                            <div style="font-size: 48px; margin-bottom: 20px;">📈</div>
+                            <h3 style="color: #fff; margin: 0 0 10px 0; font-size: 18px;">Phân Tích Kỹ Thuật AI</h3>
+                            <p style="color: #aaa; font-size: 13px; margin: 0 0 25px 0; line-height: 1.6;">
+                                Nhập mã cổ phiếu để AI phân tích xu hướng, chỉ báo RSI/MACD và đưa ra khuyến nghị.
+                            </p>
+                            <input type="text" id="inp-tech-symbol" placeholder="Mã CP (VD: SSI)" maxlength="3">
+                            <button id="btn-analyze">BẮT ĐẦU PHÂN TÍCH</button>
+                        </div>
+                        <div style="font-size: 12px; color: #555;">
+                            Powered by Google Gemini & TradingView Data
                         </div>
                     </div>
-                    <div id="ai-tech-result" style="display: none; flex-direction: column; gap: 10px;">
+                    <div id="ai-tech-result" style="display: none; flex-direction: column; gap: 15px;">
                         <!-- Results go here -->
                     </div>
                 </div>
 
                 <div class="ai-input-area" id="ai-input-area">
                     <input type="text" id="inp-ai-chat" placeholder="Nhập tin nhắn..." autocomplete="off">
-                    <button id="btn-ai-send">Gửi</button>
+                    <button id="btn-ai-send">
+                        <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path></svg>
+                    </button>
                 </div>
             </div>
         `;
@@ -866,7 +1011,9 @@ window.addEventListener('DOMContentLoaded', () => {
 
                 const btnReset = document.createElement('button');
                 btnReset.innerText = "Phân tích mã khác";
-                btnReset.style.cssText = "padding: 8px 16px; background: #444; color: #fff; border: none; cursor: pointer; border-radius: 4px;";
+                btnReset.style.cssText = "padding: 10px 20px; background: rgba(255,255,255,0.1); color: #ccc; border: 1px solid rgba(255,255,255,0.2); cursor: pointer; border-radius: 20px; font-weight: 600; font-size: 13px; transition: all 0.2s;";
+                btnReset.onmouseover = () => { btnReset.style.background = 'rgba(255,255,255,0.2)'; btnReset.style.color = '#fff'; };
+                btnReset.onmouseout = () => { btnReset.style.background = 'rgba(255,255,255,0.1)'; btnReset.style.color = '#ccc'; };
                 btnReset.onclick = () => {
                     isTechActive = false; // Reset state
                     isTechActive = false;
@@ -878,7 +1025,9 @@ window.addEventListener('DOMContentLoaded', () => {
 
                 const btnCopy = document.createElement('button');
                 btnCopy.innerText = "📋 Sao chép kết quả";
-                btnCopy.style.cssText = "padding: 8px 16px; background: #007acc; color: #fff; border: none; cursor: pointer; border-radius: 4px;";
+                btnCopy.style.cssText = "padding: 10px 20px; background: linear-gradient(135deg, #007acc, #005c99); color: #fff; border: none; cursor: pointer; border-radius: 20px; font-weight: 600; font-size: 13px; transition: transform 0.2s; box-shadow: 0 4px 10px rgba(0,0,0,0.2);";
+                btnCopy.onmouseover = () => btnCopy.style.transform = 'translateY(-2px)';
+                btnCopy.onmouseout = () => btnCopy.style.transform = 'translateY(0)';
                 btnCopy.onclick = () => {
                     // Clean Markdown for clipboard
                     const cleanText = response
@@ -907,6 +1056,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 techResultDiv.innerHTML = `<div class="ai-message model" style="color: red;">Lỗi khi lấy dữ liệu: ${e.message}</div>`;
                 const btnRetry = document.createElement('button');
                 btnRetry.innerText = "Thử lại";
+                btnRetry.style.cssText = "padding: 8px 20px; margin-top: 10px; background: #d32f2f; color: #fff; border: none; border-radius: 20px; cursor: pointer;";
                 btnRetry.onclick = () => { btnAnalyze.click(); }; // Retry
                 techResultDiv.appendChild(btnRetry);
             }

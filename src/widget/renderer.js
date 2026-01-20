@@ -33,12 +33,12 @@ ipcRenderer.on('update-prices', (event, data) => {
         // Change is now in 1k unit (0.1 = 100d). Ensure 2 decimals for alignment.
         const changeStr = new Intl.NumberFormat('en-US', {
             signDisplay: 'always',
-            minimumFractionDigits: 2,
+            minimumFractionDigits: 0,
             maximumFractionDigits: 2
         }).format(item.change);
         const percentStr = new Intl.NumberFormat('en-US', {
             signDisplay: 'always',
-            minimumFractionDigits: 2,
+            minimumFractionDigits: 0,
             maximumFractionDigits: 2
         }).format(item.percent);
 
