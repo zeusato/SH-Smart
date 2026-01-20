@@ -201,7 +201,7 @@ window.addEventListener('DOMContentLoaded', () => {
         const btn = document.createElement('div'); btn.innerHTML = '⚙️'; btn.onclick = () => { require('electron').ipcRenderer.send('open-settings'); };
         btn.style.cssText = `cursor: pointer; font-size: 18px; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 4px; color: #ccc;`;
         btnContainer.appendChild(btn); titleBar.appendChild(btnContainer); document.body.appendChild(titleBar);
-        const style = document.createElement('style'); style.innerHTML = `body { margin-top: 40px !important; } header, .header, #header { top: 40px !important; }`;
+        const style = document.createElement('style'); style.innerHTML = `body { margin-top: 40px !important; }`;
         document.head.appendChild(style);
         // F1-F7 Shortcuts
         window.addEventListener('keydown', (e) => {
@@ -790,7 +790,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 // Fetching is fast enough (<1s). The AI part is the slow one.
 
                 const to = Math.floor(Date.now() / 1000);
-                const from = to - (40 * 24 * 60 * 60);
+                const from = to - (60 * 24 * 60 * 60);
 
                 // Step 1: Realtime
                 const infoRes = await fetch(`https://shsmart.shs.com.vn/api/v1/finance/stockInfos?symbol=${symbol}`);
@@ -825,6 +825,23 @@ window.addEventListener('DOMContentLoaded', () => {
                         low: histData.l[i],
                         close: histData.c[i],
                         volume: histData.v[i]
+                    }));
+                }
+
+                // Step 3b: Weekly History (1 Year)
+                const fromWeek = to - (365 * 24 * 60 * 60);
+                const histWeekRes = await fetch(`https://shsmart.shs.com.vn/api/v1/tradingview/history?symbol=${symbol}&resolution=1W&from=${fromWeek}&to=${to}`);
+                const histWeekData = await histWeekRes.json();
+
+                context.historyWeek = [];
+                if (histWeekData && histWeekData.t) {
+                    context.historyWeek = histWeekData.t.map((t, i) => ({
+                        time: t,
+                        open: histWeekData.o[i],
+                        high: histWeekData.h[i],
+                        low: histWeekData.l[i],
+                        close: histWeekData.c[i],
+                        volume: histWeekData.v[i]
                     }));
                 }
 

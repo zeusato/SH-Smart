@@ -123,18 +123,24 @@ class AIService {
     async analyzeStock(symbol, marketData) {
         if (!this.model) return "Chưa cấu hình API Key.";
 
-        const { price, change, percent, history, indicators, quote } = marketData;
+        const { price, change, percent, history, indicators, quote, historyWeek } = marketData;
 
-        // ... (Keep summary logic essentially the same, abbreviating here for tool usage efficiency if I could, but I must provide full replacement content for the range)
-        // I will just use the View output to reconstruct the prompt string part or verify.
-        // To be safe, I'm replacing the whole method.
-
-        let historySummary = "Không có dữ liệu lịch sử.";
+        let historySummary = "Không có dữ liệu lịch sử ngày.";
         if (history && history.length > 0) {
-            const last5 = history.slice(-5).map(h =>
-                `- ${new Date(h.time * 1000).toLocaleDateString()}: Close ${h.close}, Vol ${h.volume}`
+            // Updated to take 60 days as requested (was 40)
+            const daysToTake = 60;
+            const recentHistory = history.slice(-daysToTake).map(h =>
+                `- ${new Date(h.time * 1000).toLocaleDateString()}: Close ${h.close}, Vol ${h.volume}, Open ${h.open}, High ${h.high}, Low ${h.low}`
             ).join("\n");
-            historySummary = `Dữ liệu 5 phiên gần nhất:\n${last5}`;
+            historySummary = `Dữ liệu lịch sử NGÀY (${daysToTake} phiên gần nhất):\n${recentHistory}`;
+        }
+
+        let historyWeekSummary = "Không có dữ liệu lịch sử tuần.";
+        if (historyWeek && historyWeek.length > 0) {
+            const recentHistoryWeek = historyWeek.map(h =>
+                `- ${new Date(h.time * 1000).toLocaleDateString()}: Close ${h.close}, Vol ${h.volume}, Open ${h.open}, High ${h.high}, Low ${h.low}`
+            ).join("\n");
+            historyWeekSummary = `Dữ liệu lịch sử TUẦN (1 Năm qua):\n${recentHistoryWeek}`;
         }
 
         let taSummary = "Không có chỉ số kỹ thuật.";
@@ -170,8 +176,11 @@ Hãy phân tích mã cổ phiếu ${symbol} dựa trên dữ liệu sau:
 **2. Các chỉ báo kỹ thuật (Technical Indicators):**
 ${taSummary}
 
-**3. Lịch sử giá gần đây:**
+**3. Lịch sử giá NGÀY gần đây:**
 ${historySummary}
+
+**4. Lịch sử giá TUẦN (Weekly Candles - 1 Year):**
+${historyWeekSummary}
 
 **Yêu cầu đầu ra:**
 1. **Xu hướng hiện tại**: Ngắn hạn & Trung hạn (Tăng/Giảm/Đi ngang).
